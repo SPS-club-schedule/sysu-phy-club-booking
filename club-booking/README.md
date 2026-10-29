@@ -1,5 +1,9 @@
 # 物院社团时间预约
 
+## 2026-10-29 组织迁移
+
+仓库迁至 https://github.com/SPS-club-schedule/sysu-phy-club-booking ，保持公开。网站地址改为 https://sps-club-schedule.github.io/sysu-phy-club-booking/ 。以下旧地址均为历史记录。uniCloud 支付宝云空间及数据保持原位；API 同时允许新旧 Pages 源以支持迁移。
+
 ## 当前部署：GitHub Pages + uniCloud 支付宝云（2026-10-09）
 
 本节取代下方历史部署说明。保留原网址 https://farawayshore.github.io/sysu-phy-club-booking/ 。

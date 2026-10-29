@@ -55,3 +55,15 @@ test('committed mutation returns the full snapshot without a second database rea
  const repeated=json(await h(event('DELETE',{id:created.id,confirmed:true})));
  assert.equal(repeated.snapshot.revision,11);assert.deepEqual(repeated.snapshot.bookings,[]);
 });
+
+// Keep both sites usable during the organization transfer.
+test('organization Pages origin can read and preflight booking mutations', async()=>{
+ const h=fixture();
+ for(const origin of ['https://sps-club-schedule.github.io','https://farawayshore.github.io']){
+  for(const method of ['GET','OPTIONS']){
+   const r=await h({...event(method),headers:{origin}});
+   assert.equal(r.statusCode,200);
+   assert.equal(r.headers['Access-Control-Allow-Origin'],origin);
+  }
+ }
+});

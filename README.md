@@ -1,6 +1,6 @@
 # 物院社团时间预约
 
-网站：https://farawayshore.github.io/sysu-phy-club-booking/
+网站：https://sps-club-schedule.github.io/sysu-phy-club-booking/
 
 前端由 GitHub Pages 托管，后端使用 uniCloud 支付宝云。源码位于 `club-booking/`，课表源为 `club-booking/data/timetables.json`。
 

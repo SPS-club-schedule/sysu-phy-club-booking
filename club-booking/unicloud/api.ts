@@ -5,9 +5,9 @@ import { validateCurriculum, validCourseFilters,findCourseConflicts, type Curric
 export type State = { bookings: Booking[]; curriculum: Curriculum };
 function publicSnapshot(state:State,revision:number){const t=today();return {revision,today:t,bookings:state.bookings.filter(b=>b.date>=t&&b.date<=bookingEnd(t)).sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)),curriculum:state.curriculum}}
 export type Store = { read(): Promise<{ revision: number; state: State }>; compareAndSet(revision: number, state: State): Promise<boolean> };
-const ORIGIN = 'https://farawayshore.github.io';
+const ORIGINS = ['https://sps-club-schedule.github.io', 'https://farawayshore.github.io'];
 type Event = { path?: string; httpMethod?: string; headers?: Record<string,string>; body?: string; isBase64Encoded?: boolean };
-export function createHandler(store: Store, notify?: (revision:number)=>Promise<void>, origins:readonly string[]=[ORIGIN]) {
+export function createHandler(store: Store, notify?: (revision:number)=>Promise<void>, origins:readonly string[]=ORIGINS) {
  return async (event: Event = {}) => {
   const headers: Record<string,string> = { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', Vary:'Origin' };
   const incoming = Object.fromEntries(Object.entries(event.headers || {}).map(([k,v])=>[k.toLowerCase(),v]));
