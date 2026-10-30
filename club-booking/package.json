@@ -12,11 +12,13 @@
     "start": "node node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "deploy": "npm run deploy:api",
+    "deploy": "npm run deploy:cloudflare",
     "db:migrate:local": "node node_modules/wrangler/bin/wrangler.js d1 migrations apply DB --local --config wrangler.jsonc",
     "db:migrate:remote": "node node_modules/wrangler/bin/wrangler.js d1 migrations apply DB --remote --config wrangler.api.jsonc",
     "deploy:api": "node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.api.jsonc",
     "build:pages": "node scripts/export-pages.mjs",
+    "build:cloudflare": "node scripts/build-cloudflare.mjs",
+    "deploy:cloudflare": "node scripts/deploy-cloudflare.mjs",
     "db:import:curriculum": "node scripts/import-curriculum.mjs"
   },
   "dependencies": {

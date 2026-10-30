@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sysu-phy-club-booking",
+  "account_id": "9b780cdb0cd2a083330601598d3ea9dc",
+  "main": "worker/cloudflare.ts",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "outputs/github-pages",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/__migration"]
+  },
+  "durable_objects": { "bindings": [{ "name": "BOOKINGS", "class_name": "BookingState" }] },
+  "migrations": [{ "tag": "booking-state-v1", "new_sqlite_classes": ["BookingState"] }],
+  "vars": {
+    "ALLOWED_ORIGINS": "https://sysu-phy-club-book.folderrewind.top,https://sysu-phy-club-booking.zhuolin-yew.workers.dev,https://sps-club-schedule.github.io,https://farawayshore.github.io"
+  }
+}

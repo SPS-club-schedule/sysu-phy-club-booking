@@ -1,5 +1,17 @@
 # 物院社团时间预约
 
+## 当前部署：Cloudflare Worker + SQLite Durable Object（2026-10-30）
+
+- 正式网站和 API：https://sysu-phy-club-book.folderrewind.top/ 。沿用 Leafuke 账号中已有的 `sysu-phy-club-booking` Worker 和域名绑定。
+- 预约、历史记录和公开课表保存在该 Worker 的 SQLite Durable Object `BookingState` 中；版本条件更新保证并发冲突重检。实时更新使用 Cloudflare WebSocket 和休眠机制，新网页不再连接 uniCloud 或 uni-push。
+- 完整迁入 11 条预约（其中 3 条是迁移时仍在可预约窗口内的记录）、4 份年级课表、57 条排课规则。迁入前后完整数据逐项一致；原 uniCloud 数据保留为迁移时备份。
+- GitHub Pages 地址继续可用：https://sps-club-schedule.github.io/sysu-phy-club-booking/ ，使用相同 Cloudflare API。旧 uniCloud API 仅为旧页面转发请求，不再读写原数据库；旧页面请刷新以启用新的实时连接。
+- `npm run deploy` 构建前端、上传 Worker 版本并切换 100% 流量，使用 `wrangler.leafuke.jsonc`。版本发布保留已有域名绑定，不需要账号级域名管理权限。`npm run build:pages` 默认也构建 Cloudflare 版本。
+- 公开预约和二次确认取消的权限不变；课表仍只读。两个本地 HTML 的存储 key 不变，仍仅保存在当前浏览器，不会自动同步到云端。
+- 类型检查、72 项 Node 测试、12 项 SQL 冲突检查、构建和部署 dry-run 已通过；线上新增、重复拦截、旧 API 读取/取消、WebSocket 推送与测试数据清理已验证。详见 [迁移记录](plans/cloudflare-migration-20261030.md)。
+
+下文均为历史部署记录，涉及 uniCloud、旧 D1、旧命令和旧 URL 的说明以本节为准。
+
 ## 2026-10-29 组织迁移
 
 仓库迁至 https://github.com/SPS-club-schedule/sysu-phy-club-booking ，保持公开。网站地址改为 https://sps-club-schedule.github.io/sysu-phy-club-booking/ 。以下旧地址均为历史记录。uniCloud 支付宝云空间及数据保持原位；API 同时允许新旧 Pages 源以支持迁移。
