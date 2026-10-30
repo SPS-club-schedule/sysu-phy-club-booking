@@ -66,4 +66,3 @@ export function createHandler(store: Store, notify?: (revision:number)=>Promise<
   }catch{return reply({error:'服务暂时不可用，请稍后重试'},503)}
  };
 }
-

@@ -1,6 +1,6 @@
 # 物院社团时间预约
 
-- 2026-10-30 起正式后端为 Leafuke 账号的 `sysu-phy-club-booking` Worker 和 SQLite Durable Object，配置 `wrangler.leafuke.jsonc`；正式入口 https://sysu-phy-club-book.folderrewind.top/ 。旧 D1 / uniCloud 数据仅作历史备份，不可用它们覆盖当前数据库。详情见 plans/cloudflare-migration-20261030.md。
+- 2026-10-30 起正式后端为 Leafuke 账号的 `sysu-phy-club-booking` Worker 和 SQLite Durable Object，配置 `wrangler.leafuke.jsonc`；前端唯一正式入口为 https://sps-club-schedule.github.io/sysu-phy-club-booking/ ，Leafuke 域名 https://sysu-phy-club-book.folderrewind.top 仅承载 API/WebSocket；不要向该 Worker 发布静态前端。旧 D1 / uniCloud 数据仅作历史备份，不可用它们覆盖当前数据库。详情见 plans/cloudflare-migration-20261030.md。
 
 - 这是独立 Git 项目。先阅读 README.md 及 plans/other/club-booking-handoff.md。
 - 保留已有工作区修改；未获要求不要重置、删除记录、创建替代线上站点或改变原 Sites 标识。

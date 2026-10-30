@@ -2,7 +2,8 @@
 
 ## 线上状态
 
-- 网站/API： https://sysu-phy-club-book.folderrewind.top/
+- 网站保持 GitHub Pages 原地址： https://sps-club-schedule.github.io/sysu-phy-club-booking/
+- 仅后端使用 Leafuke 域名： https://sysu-phy-club-book.folderrewind.top ，根路径302跳转到 Pages，`/api/*` 和 WebSocket 仍由 Worker 处理；Worker 不再绑定或上传静态前端。
 - GitHub： https://github.com/SPS-club-schedule/sysu-phy-club-booking
 - Leafuke Cloudflare 账号：`9b780cdb0cd2a083330601598d3ea9dc`。
 - 沿用已有 Worker：`sysu-phy-club-booking`；沿用域名及 `sysu-phy-club-booking.zhuolin-yew.workers.dev`。
@@ -31,13 +32,13 @@ npm run deploy
 npm run build:pages
 ```
 
-`scripts/deploy-cloudflare.mjs` 先构建前端，再 `wrangler versions upload`，取得明确版本 ID 后 `versions deploy <id>@100 --yes`。它不会修改现有域名绑定。初次创建 Durable Object 需要执行带 migration 的首次上传，此步骤已完成，不要创建第二个生产实例。
+`scripts/deploy-cloudflare.mjs` 仅执行后端的 `wrangler versions upload`，取得明确版本 ID 后 `versions deploy <id>@100 --yes`。前端由 `npm run build:pages` 生成，通过仓库现有 GitHub Pages 工作流单独发布。它不会修改现有域名绑定。初次创建 Durable Object 需要执行带 migration 的首次上传，此步骤已完成，不要创建第二个生产实例。
 
 当前成员角色是 Individual Workers Admin：可以发布这个 Worker 及其绑定；账号级 namespace 列表、D1 列表、域名列表和 workers.dev 子域名查询会被拒绝。普通 `wrangler deploy` 曾在成功上传和激活后因查询账号子域名报错，已通过部署记录核实实际成功；后续采用版本发布避免该无关步骤。无需为了本次已完成的迁移扩大权限。
 
 生产配置：`wrangler.leafuke.jsonc`。旧 `wrangler.api.jsonc` / `wrangler.jsonc` 保留历史/框架构建用途，不是当前生产存储。默认 uniCloud 构建模式现在是 `forward`；不要重新发布 `normal` 模式造成两个数据库独立写入。
 
-临时 `/__migration` 管理导入/导出仅在 `MIGRATION_TOKEN` 存在时开放。迁移结束已删除该密钥及 `BOOKING_MAINTENANCE`，线上仅保留 `ALLOWED_ORIGINS`、`ASSETS`、`BOOKINGS` 三个绑定。敏感值未写入仓库。需要未来备份或维护时，管理者应使用受保护的管理通道，不要增加公开课表写入接口。
+临时 `/__migration` 管理导入/导出仅在 `MIGRATION_TOKEN` 存在时开放。迁移结束已删除该密钥及 `BOOKING_MAINTENANCE`，拆分前后端后仅保留 `ALLOWED_ORIGINS`、`FRONTEND_URL`、`BOOKINGS` 三个绑定。敏感值未写入仓库。需要未来备份或维护时，管理者应使用受保护的管理通道，不要增加公开课表写入接口。
 
 Cloudflare 跨版本发布会保留秘密变量；切换到上传于秘密变量创建前的版本不会自动删除它们。必须显式删除并核实当前绑定。存在未部署的最新版本时，普通 secret 修改会报10215；先明确部署最新版本，再删除临时秘密变量。
 
@@ -52,3 +53,11 @@ Cloudflare 跨版本发布会保留秘密变量；切换到上传于秘密变量
 ## 回滚边界
 
 切换前失败可以恢复原 uniCloud 函数，并保持 Cloudflare 禁止写入。切换后已经有新写入时，不能直接恢复原 uniCloud 数据库或旧 D1；应保留当前 Durable Object，回退兼容的 Worker 代码，或冻结写入后完整导出最新数据再进行反向迁移。
+
+## 用户澄清：保留原 GitHub Pages 前端
+
+用户明确要求原 GitHub Pages 域名继续作为网站，Leafuke 域名仅供免费 Cloudflare 后端访问。之前同域同时托管前端是对用户意图的误解，已移除 `assets` 配置和 `ASSETS` 绑定；根路径跳回 Pages。数据库和已迁移数据不变，不重新初始化、不反向迁移。无需更换前端 API 地址。
+
+当前机器上禁用 curl 的显式代理后，后端健康接口返回200；这只能证明本机的这次请求，不能保证所有校园网/运营商均可直连。
+
+拆分发布版本：`7993ba05-3503-4046-b3be-3870d1b905fd`，100%流量。线上验证后端根路径302至原Pages、`/index.html` 返回404、Pages来源CORS预检及WebSocket正常；公开数据完整一致，revision36未改变。回执：`outputs/cloudflare-migration/backend-only-verification.json`。

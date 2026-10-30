@@ -1,12 +1,13 @@
 # 物院社团时间预约
 
-## 当前部署：Cloudflare Worker + SQLite Durable Object（2026-10-30）
+## 当前部署：GitHub Pages 前端 + Cloudflare 后端（2026-10-30）
 
-- 正式网站和 API：https://sysu-phy-club-book.folderrewind.top/ 。沿用 Leafuke 账号中已有的 `sysu-phy-club-booking` Worker 和域名绑定。
+- 正式网站保持原 GitHub Pages 地址：https://sps-club-schedule.github.io/sysu-phy-club-booking/ 。
+- 后端基址：https://sysu-phy-club-book.folderrewind.top ，仅提供 `/api/*`（包括 WebSocket），根路径302跳转到 GitHub Pages。沿用 Leafuke 账号中已有的 `sysu-phy-club-booking` Worker 和域名绑定，不托管静态前端。
 - 预约、历史记录和公开课表保存在该 Worker 的 SQLite Durable Object `BookingState` 中；版本条件更新保证并发冲突重检。实时更新使用 Cloudflare WebSocket 和休眠机制，新网页不再连接 uniCloud 或 uni-push。
 - 完整迁入 11 条预约（其中 3 条是迁移时仍在可预约窗口内的记录）、4 份年级课表、57 条排课规则。迁入前后完整数据逐项一致；原 uniCloud 数据保留为迁移时备份。
-- GitHub Pages 地址继续可用：https://sps-club-schedule.github.io/sysu-phy-club-booking/ ，使用相同 Cloudflare API。旧 uniCloud API 仅为旧页面转发请求，不再读写原数据库；旧页面请刷新以启用新的实时连接。
-- `npm run deploy` 构建前端、上传 Worker 版本并切换 100% 流量，使用 `wrangler.leafuke.jsonc`。版本发布保留已有域名绑定，不需要账号级域名管理权限。`npm run build:pages` 默认也构建 Cloudflare 版本。
+- GitHub Pages 通过上述自定义域名跨域访问 Cloudflare API，CORS 精确允许原 Pages 来源。旧 uniCloud API 仅为旧页面转发请求，不再读写原数据库；旧页面请刷新以启用新的实时连接。
+- `npm run deploy` 仅上传和发布 Cloudflare 后端，使用 `wrangler.leafuke.jsonc`，保留已有域名及存储绑定。`npm run build:pages` 构建调用 Cloudflare API 的前端，再通过现有 GitHub Pages 工作流发布。两部分独立发布，不把前端传到 Worker。
 - 公开预约和二次确认取消的权限不变；课表仍只读。两个本地 HTML 的存储 key 不变，仍仅保存在当前浏览器，不会自动同步到云端。
 - 类型检查、72 项 Node 测试、12 项 SQL 冲突检查、构建和部署 dry-run 已通过；线上新增、重复拦截、旧 API 读取/取消、WebSocket 推送与测试数据清理已验证。详见 [迁移记录](plans/cloudflare-migration-20261030.md)。
 

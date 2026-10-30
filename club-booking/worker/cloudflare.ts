@@ -5,8 +5,8 @@ import { cancellationId } from '../app/schedule';
 
 type Env = {
   BOOKINGS: DurableObjectNamespace<BookingState>;
-  ASSETS: Fetcher;
   ALLOWED_ORIGINS: string;
+  FRONTEND_URL: string;
   MIGRATION_TOKEN?: string;
   BOOKING_MAINTENANCE?: string;
 };
@@ -128,6 +128,7 @@ export class BookingState extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (path === '/' && ['GET', 'HEAD'].includes(request.method)) return Response.redirect(env.FRONTEND_URL, 302);
     if (path === '/api/health' && request.method === 'GET') {
       const response = json({ ok: true, service: 'club-booking-connectivity', backend: 'cloudflare' });
       const origin = request.headers.get('origin');
@@ -138,6 +139,6 @@ export default {
     if (path.startsWith('/api/') || path === '/__migration') {
       return env.BOOKINGS.get(env.BOOKINGS.idFromName('club-booking-production')).fetch(request);
     }
-    return env.ASSETS.fetch(request);
+    return json({ error: '接口不存在' }, 404);
   },
 };

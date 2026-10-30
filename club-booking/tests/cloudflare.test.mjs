@@ -9,13 +9,14 @@ import { today, addDays } from '../app/schedule.ts';
 
 const bundle = await build({entryPoints:['worker/cloudflare.ts'],bundle:true,write:false,format:'esm',platform:'node',external:['cloudflare:workers']});
 const origin = 'https://sysu-phy-club-book.folderrewind.top';
+const frontend = 'https://sps-club-schedule.github.io/sysu-phy-club-booking/';
 const payload = {club:'SPS',activity:'migration test',location:'test',date:addDays(today(),1),start:'08:00',end:'09:00'};
 const historical = {id:'1c19701e-951b-4177-8958-ef77f16b3502',...payload,date:'2026-01-01'};
 const initial = {revision:34,state:{bookings:[historical],curriculum:{version:1,timetables:[]}}};
 const options = {
   modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],
   durableObjects:{BOOKINGS:{className:'BookingState',useSQLite:true}},
-  bindings:{ALLOWED_ORIGINS:origin,MIGRATION_TOKEN:'test-only-migration-token'},
+  bindings:{ALLOWED_ORIGINS:origin,FRONTEND_URL:frontend,MIGRATION_TOKEN:'test-only-migration-token'},
 };
 const request = (mf,path,method='GET',body,headers={}) => mf.dispatchFetch('https://booking.test'+path,{
   method,headers:{origin,...headers},...(body===undefined?{}:{body:JSON.stringify(body)}),
@@ -27,6 +28,9 @@ test('SQLite migration is protected, insert-only, and survives a Worker restart'
   const directory = await mkdtemp(join(tmpdir(),'booking-do-'));
   let mf = new Miniflare({...options,durableObjectsPersist:directory});
   try {
+    const root=await mf.dispatchFetch('https://booking.test/',{redirect:'manual'});
+    assert.equal(root.status,302);assert.equal(root.headers.get('location'),frontend);
+    assert.equal((await request(mf,'/index.html')).status,404);
     assert.equal((await request(mf,'/api/bookings')).status,503);
     assert.equal((await request(mf,'/__migration','POST',initial)).status,404);
     assert.equal((await request(mf,'/__migration','POST',{...initial,revision:-1},admin)).status,400);
@@ -37,7 +41,7 @@ test('SQLite migration is protected, insert-only, and survives a Worker restart'
     await mf.dispose();
     mf = new Miniflare({...options,durableObjectsPersist:directory});
     assert.deepEqual(await (await request(mf,'/__migration','GET',undefined,admin)).json(),initial);
-    await mf.setOptions({...options,durableObjectsPersist:directory,bindings:{ALLOWED_ORIGINS:origin}});
+    await mf.setOptions({...options,durableObjectsPersist:directory,bindings:{ALLOWED_ORIGINS:origin,FRONTEND_URL:frontend}});
     assert.equal((await request(mf,'/__migration','GET',undefined,admin)).status,404);
     assert.equal((await request(mf,'/api/bookings')).status,200);
   } finally { await mf.dispose(); await rm(directory,{recursive:true,force:true}); }

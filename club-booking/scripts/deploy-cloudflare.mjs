@@ -12,7 +12,8 @@ async function run(args) {
   return output;
 }
 
-await run(['scripts/build-cloudflare.mjs']);
+// Deploy only the API and realtime backend. Publish frontend files through the
+// repository's existing GitHub Pages workflow, independently of this command.
 // The domain already belongs to this Worker. Version deployment preserves its
 // routes and works with Individual Workers Admin, without account-wide access.
 const output = await run([wrangler, 'versions', 'upload', '--config', config]);
