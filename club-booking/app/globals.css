@@ -102,3 +102,5 @@
 .course-color-legend>span::before{content:'';width:13px;height:13px;border:1px solid var(--course-edge);border-radius:3px;background:var(--course-bg)}
 .course-color-legend small{font-size:10px;color:#767e8c}
 @media(max-width:760px){.course-color-legend{font-size:10px;gap:6px 8px}.course-color-legend small{width:100%}}
+
+.sps-source-link{display:flex;align-items:center;justify-content:center;text-align:center;border-radius:12px;background:#2b5746;color:white;padding:12px;text-decoration:none;font-size:14px}

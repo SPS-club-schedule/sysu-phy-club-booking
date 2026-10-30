@@ -2,6 +2,8 @@ import { DurableObject } from 'cloudflare:workers';
 import { createHandler, type State } from '../app/booking-handler';
 import { validateCurriculum } from '../app/curriculum';
 import { cancellationId } from '../app/schedule';
+import {validateSpsSnapshot} from '../app/sps-integration';
+import {timingSafeEqual} from 'node:crypto';
 
 type Env = {
   BOOKINGS: DurableObjectNamespace<BookingState>;
@@ -9,6 +11,8 @@ type Env = {
   FRONTEND_URL: string;
   MIGRATION_TOKEN?: string;
   BOOKING_MAINTENANCE?: string;
+  SPS_SYNC_KEY?: string;
+  SPS_CLUB_ID?: string;
 };
 type Snapshot = { revision: number; state: State };
 const json = (value: unknown, status = 200) => Response.json(value, {
@@ -60,6 +64,24 @@ export class BookingState extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
     const origins = this.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean);
+    if(path==='/api/integrations/sps'){
+      const supplied=request.headers.get('authorization') || '',expected='Bearer '+this.env.SPS_SYNC_KEY;
+      if(!this.env.SPS_SYNC_KEY || !this.env.SPS_CLUB_ID || Buffer.byteLength(supplied)!==Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(supplied),Buffer.from(expected)))return json({error:'Not found'},404);
+      if(request.method!=='PUT')return json({error:'Method not allowed'},405);
+      if(this.env.BOOKING_MAINTENANCE==='true')return json({error:'Maintenance'},503);
+      const raw=await request.text();
+      if(Buffer.byteLength(raw)>3_000_000)return json({error:'Snapshot too large'},413);
+      let snapshot;try{snapshot=validateSpsSnapshot(JSON.parse(raw),this.env.SPS_CLUB_ID)}catch{return json({error:'Invalid SPS snapshot'},400)}
+      // No await between read and conditional write: concurrent ordinary bookings
+      // are preserved, and stale/retried snapshots can never resurrect old blocks.
+      const current=this.read();
+      if(current.state.sps && current.state.sps.sourceId!==snapshot.sourceId)return json({error:'Source mismatch'},409);
+      if(current.state.sps && current.state.sps.version>=snapshot.version)return json({sourceVersion:current.state.sps.version,revision:current.revision});
+      current.state.sps=snapshot;
+      this.ctx.storage.sql.exec('UPDATE booking_state SET revision=?,payload=? WHERE id=1',current.revision+1,JSON.stringify(current.state));
+      this.broadcast(current.revision+1);
+      return json({sourceVersion:snapshot.version,revision:current.revision+1});
+    }
     if (path === '/__migration') {
       // Temporary operator-only import/export. Removing the secret disables it.
       if (!this.env.MIGRATION_TOKEN || request.headers.get('authorization') !== `Bearer ${this.env.MIGRATION_TOKEN}`)

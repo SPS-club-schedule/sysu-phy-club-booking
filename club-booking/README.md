@@ -1,5 +1,9 @@
 # 物院社团时间预约
 
+## SPS 日程互通（2026-10-30）
+
+SPS 日程的持续任务自动显示为 SPS 活动块，地点未设时显示“未定”；时间、地点、归档和恢复同步更新。同步块通过原任务管理，预约页详情提供入口；手动预约及课程保留。公开活动接口供 SPS 展示其他社团安排，不含课程。详见 [连接规则和维护](plans/sps-integration.md)。
+
 ## 当前部署：GitHub Pages 前端 + Cloudflare 后端（2026-10-30）
 
 - 正式网站保持原 GitHub Pages 地址：https://sps-club-schedule.github.io/sysu-phy-club-booking/ 。

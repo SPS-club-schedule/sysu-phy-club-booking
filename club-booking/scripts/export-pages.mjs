@@ -10,7 +10,7 @@ const cloudflare=backend==='cloudflare';
 const apiUrl = new URL(process.env.BOOKING_API_BASE || (cloudflare?'https://sysu-phy-club-book.folderrewind.top':'https://env-00jy6xwsp3aa.dev-hz.cloudbasefunction.cn/booking-api'));
 if(apiUrl.username || apiUrl.password || apiUrl.search || apiUrl.hash)throw new Error('Invalid API base');
 const apiBase = apiUrl.origin + apiUrl.pathname.replace(/\/$/,'');
-if (!apiBase.startsWith('https://')) throw new Error('Online API must use HTTPS');
+if (apiUrl.protocol!=='https:' && !(apiUrl.protocol==='http:' && ['127.0.0.1','localhost'].includes(apiUrl.hostname))) throw new Error('Online API must use HTTPS');
 const result = await build({absWorkingDir:root,entryPoints:['online/entry.tsx'],bundle:true,write:false,metafile:true,format:'iife',platform:'browser',target:['es2022'],jsx:'automatic',minify:true,plugins:cloudflare?[{name:'cloudflare-updates',setup(build){build.onResolve({filter:/^\.\/push$/},()=>({path:resolve(root,'online/cloudflare-push.ts')}))}}]:[],define:{'process.env.NODE_ENV':'"production"',__BOOKING_API_BASE__:JSON.stringify(apiBase),__BOOKING_PUSH_ENABLED__:JSON.stringify(pushEnabled)},legalComments:'inline'});
 if (cloudflare && Object.keys(result.metafile.inputs).some(path=>path.includes('online/vendor/'))) throw new Error('Cloudflare frontend must not bundle uni-push');
 if (Object.keys(result.metafile.inputs).some(path=>path.endsWith('data/timetables.json'))) throw new Error('Online frontend must not bundle timetable source data');

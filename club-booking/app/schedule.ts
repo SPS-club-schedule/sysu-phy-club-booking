@@ -1,7 +1,7 @@
 export const PERIODS = [ ['08:00','08:45'],['08:55','09:40'],['10:10','10:55'],['11:05','11:50'],['14:20','15:05'],['15:15','16:00'],['16:30','17:15'],['17:25','18:10'],['19:00','19:45'],['19:55','20:40'],['20:50','21:35'] ];
 export const SLOTS = [0,2,4,6,8,10].map(i=>({label:i===10?'第 11 节':`第 ${i+1}–${i+2} 节`,start:PERIODS[i][0],end:PERIODS[Math.min(i+1,10)][1]}));
 export const CLUBS: string[] = ['SPS', 'torchwood', '学生会'];
-export type Booking = {id:string;club:string;activity:string;location:string;date:string;start:string;end:string};
+export type Booking = {id:string;club:string;activity:string;location:string;date:string;start:string;end:string;source?:'sps-schedule';sourceTaskId?:string};
 export function today(now=new Date()){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(now)}
 export function addDays(date:string,n:number){const d=new Date(date+'T12:00:00+08:00');d.setUTCDate(d.getUTCDate()+n);return today(d)}
 export function monday(date:string){const day=new Date(date+'T12:00:00+08:00').getUTCDay();return addDays(date,-((day+6)%7))}
