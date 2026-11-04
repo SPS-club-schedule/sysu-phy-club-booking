@@ -36,7 +36,9 @@ export async function bookingApiFetch(resource = 'bookings', init: RequestInit =
       clearTimeout(timer);
       init.signal?.removeEventListener('abort', abort);
     }
-    if(response.status===401&&session&&['bookings','curriculum','auth/me','auth/live-ticket'].includes(resource))saveSession(null,'expired');
+    // Expiry may have occurred while the calendar remained open, in which case
+    // readSession already returns null. Still notify the UI and native vault.
+    if(response.status===401&&typeof window!=='undefined'&&['bookings','curriculum','auth/me','auth/live-ticket'].includes(resource))saveSession(null,'expired');
     if(response.status!==404 || attempt>=2)return response;
     const body=await response.clone().json().catch(()=>null) as {error?: {code?: string; message?: string}} | null;
     if(body?.error?.code!=='InternalBizError' || typeof body.error.message!=='string' || !body.error.message.startsWith('no_matching_function_for_path '))return response;

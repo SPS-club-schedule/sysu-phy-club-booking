@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 const built=await build({entryPoints:['app/booking-api.ts'],bundle:true,write:false,format:'esm',platform:'node'});
 const {bookingApiFetch}=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64'));
+test('an already-expired session still signs out the calendar and notifies native re-login',async()=>{
+ const original=global.fetch,messages=[],events=[];
+ const storage=new Map([['physics-club-session-v1',JSON.stringify({token:'a'.repeat(64),expiresAt:Date.now()-1,user:{id:'test',club:'SPS'}})]]);
+ global.sessionStorage={getItem:key=>storage.get(key),removeItem:key=>storage.delete(key)};
+ global.window={BookingNative:{postMessage:value=>messages.push(JSON.parse(value))},dispatchEvent:event=>events.push(event.type)};
+ try{
+  global.fetch=async(_url,init)=>{assert.equal(init.headers.has('Authorization'),false);return Response.json({error:'expired'},{status:401})};
+  await bookingApiFetch('bookings');assert.equal(storage.size,0);assert.deepEqual(messages,[{type:'expired',session:null}]);assert.deepEqual(events,['booking-auth-change']);
+ }finally{global.fetch=original;delete global.window;delete global.sessionStorage}
+});
 test('a stalled request times out once and ambiguous mutations are never resubmitted',async(t)=>{
  const original=global.fetch;
  t.mock.timers.enable({apis:['setTimeout']});
