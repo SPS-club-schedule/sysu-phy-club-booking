@@ -6,6 +6,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { today, addDays } from '../app/schedule.ts';
+import {mailBindings,outboundService,verifiedSession} from './auth-fixture.mjs';
+const tokens=new WeakMap();
 
 const bundle = await build({entryPoints:['worker/cloudflare.ts'],bundle:true,write:false,format:'esm',platform:'node',external:['cloudflare:workers']});
 const origin = 'https://sysu-phy-club-book.folderrewind.top';
@@ -16,10 +18,10 @@ const initial = {revision:34,state:{bookings:[historical],curriculum:{version:1,
 const options = {
   modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],
   durableObjects:{BOOKINGS:{className:'BookingState',useSQLite:true}},
-  bindings:{ALLOWED_ORIGINS:origin,FRONTEND_URL:frontend,MIGRATION_TOKEN:'test-only-migration-token'},
+  outboundService,bindings:{...mailBindings,ALLOWED_ORIGINS:origin,FRONTEND_URL:frontend,MIGRATION_TOKEN:'test-only-migration-token'},
 };
 const request = (mf,path,method='GET',body,headers={}) => mf.dispatchFetch('https://booking.test'+path,{
-  method,headers:{origin,...headers},...(body===undefined?{}:{body:JSON.stringify(body)}),
+  method,headers:{origin,'Content-Type':'application/json',...(tokens.get(mf)?{authorization:'Bearer '+tokens.get(mf)}:{}),...headers},...(body===undefined?{}:{body:JSON.stringify(body)}),
 });
 const admin = {authorization:'Bearer test-only-migration-token'};
 const seed = mf => request(mf,'/__migration','POST',initial,admin);
@@ -28,6 +30,7 @@ test('SQLite migration is protected, insert-only, and survives a Worker restart'
   const directory = await mkdtemp(join(tmpdir(),'booking-do-'));
   let mf = new Miniflare({...options,durableObjectsPersist:directory});
   try {
+    const account=await verifiedSession(mf,origin);tokens.set(mf,account.token);
     const root=await mf.dispatchFetch('https://booking.test/',{redirect:'manual'});
     assert.equal(root.status,302);assert.equal(root.headers.get('location'),frontend);
     assert.equal((await request(mf,'/index.html')).status,404);
@@ -39,7 +42,7 @@ test('SQLite migration is protected, insert-only, and survives a Worker restart'
     assert.deepEqual(await (await request(mf,'/__migration','GET',undefined,admin)).json(),initial);
     assert.deepEqual((await (await request(mf,'/api/bookings')).json()).bookings,[]);
     await mf.dispose();
-    mf = new Miniflare({...options,durableObjectsPersist:directory});
+    mf = new Miniflare({...options,durableObjectsPersist:directory});tokens.set(mf,account.token);
     assert.deepEqual(await (await request(mf,'/__migration','GET',undefined,admin)).json(),initial);
     await mf.setOptions({...options,durableObjectsPersist:directory,bindings:{ALLOWED_ORIGINS:origin,FRONTEND_URL:frontend}});
     assert.equal((await request(mf,'/__migration','GET',undefined,admin)).status,404);
@@ -50,13 +53,15 @@ test('SQLite migration is protected, insert-only, and survives a Worker restart'
 test('concurrent writes, conflicts, CORS, snapshots, cancellation and realtime notifications', async()=>{
   const mf = new Miniflare(options);
   try {
+    const account=await verifiedSession(mf,origin),other=await verifiedSession(mf,origin,'torchwood');tokens.set(mf,account.token);
     await seed(mf);
     assert.equal((await request(mf,'/api/bookings','POST',payload,{origin:'https://evil.example'})).status,403);
     const preflight=await request(mf,'/api/bookings','OPTIONS',undefined,{'access-control-request-method':'POST','access-control-request-headers':'content-type'});
     assert.equal(preflight.headers.get('access-control-allow-origin'),origin);
     assert.equal((await request(mf,'/api/curriculum','POST',{})).status,405);
     assert.equal((await request(mf,'/api/updates','GET',undefined,{upgrade:'websocket',origin:'https://evil.example'})).status,403);
-    const live=await request(mf,'/api/updates','GET',undefined,{upgrade:'websocket'});
+    const ticket=(await (await request(mf,'/api/auth/live-ticket','POST',{})).json()).data.ticket;
+    const live=await request(mf,'/api/updates?ticket='+ticket,'GET',undefined,{upgrade:'websocket'});
     assert.equal(live.status,101);
     const socket=live.webSocket;const messages=[];
     socket.addEventListener('message',event=>messages.push(event.data));socket.accept();
@@ -64,7 +69,7 @@ test('concurrent writes, conflicts, CORS, snapshots, cancellation and realtime n
     assert.deepEqual(writes.map(r=>r.status).sort(),[201,409]);
     const created=await writes.find(r=>r.status===201).json();
     assert.equal(created.snapshot.revision,35);
-    const cross=await request(mf,'/api/bookings','POST',{...payload,club:'torchwood'});
+    const cross=await request(mf,'/api/bookings','POST',{...payload,club:'torchwood'},{authorization:'Bearer '+other.token});
     assert.equal(cross.status,409);
     assert.equal((await cross.json()).kind,'conflict');
     assert.equal((await request(mf,'/api/bookings','DELETE',{id:created.id})).status,400);

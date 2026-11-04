@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">物院社团预约</string>
+    <string name="menu">菜单</string>
+    <string name="refresh">重新加载</string>
+    <string name="open_website">在浏览器打开网页版</string>
+    <string name="about">关于</string>
+    <string name="ok">知道了</string>
+    <string name="keep">继续填写</string>
+    <string name="reload_message">重新加载将清空尚未提交的表单。只更新日历数据，可使用页面中的“刷新日历”。</string>
+    <string name="about_text">课程和各社团预约与网页版共用，联网后读取最新内容。课程更新无需更新 App；界面功能更新需安装新版。\n\n断网时可以打开界面，暂时不能获取最新安排或提交预约。SPS 同步活动请通过“打开 SPS 任务”管理。</string>
+    <string name="no_browser">没有找到可打开链接的浏览器</string>
+</resources>

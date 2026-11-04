@@ -14,7 +14,8 @@ test('public and local pages expose no timetable editing or import controls',()=
  const initialCurriculum={version:1,timetables:[{id:'g3',label:'大三',term:'测试',grade:3,week1Monday:'2026-09-07',courses:[],overrides:[]}]};
  for(const localOnly of [true,false]){
   const html=renderToStaticMarkup(createElement(Home,{localOnly,initialCurriculum}));
-  assert.match(html,/大三/);
+  if(localOnly)assert.match(html,/大三/);
+  else {assert.match(html,/正在恢复登录/);assert.doesNotMatch(html,/class="calendar-grid"/)}
   assert.doesNotMatch(html,/导入 \/ 更新课表|manage-timetables|timetable-editor|type="file"/);
  }
 });

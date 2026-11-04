@@ -1,4 +1,4 @@
-import { bookingApiUrl } from '../app/booking-api';
+import { bookingApiUrl,bookingApiFetch } from '../app/booking-api';
 import { updateRevision, type SubscribeUpdates } from '../app/live-updates';
 
 export const subscribeUpdates: SubscribeUpdates = callbacks => {
@@ -8,14 +8,26 @@ export const subscribeUpdates: SubscribeUpdates = callbacks => {
   let retry: ReturnType<typeof setTimeout> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let lastPong = 0;
+  let authorizing=false;
   const clearHeartbeat = () => { clearInterval(heartbeat); heartbeat = undefined; };
-  const connect = () => {
+  const connect = async () => {
     clearTimeout(retry);
-    if (stopped || !navigator.onLine) return;
+    if (stopped || !navigator.onLine || authorizing) return;
     if (socket && socket.readyState < WebSocket.CLOSING) return;
     callbacks.status('connecting');
     const url = new URL(bookingApiUrl('updates'), location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    authorizing=true;
+    try {
+      const response=await bookingApiFetch('auth/live-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      if(!response.ok)throw Error('Authentication required');
+      const value=await response.json() as {data:{ticket:string}};if(!/^[a-f0-9]{64}$/.test(value.data?.ticket))throw Error('Invalid ticket');
+      url.searchParams.set('ticket',value.data.ticket);
+    }catch{
+      if(!stopped){callbacks.status('disconnected');retry=setTimeout(()=>void connect(),Math.min(30000,1000*2**Math.min(attempt++,5)))}
+      return;
+    }finally{authorizing=false}
+    if(stopped||!navigator.onLine)return;
     const current = new WebSocket(url);
     socket = current;
     current.onopen = () => {

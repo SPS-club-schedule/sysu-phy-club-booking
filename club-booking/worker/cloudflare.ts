@@ -4,8 +4,9 @@ import { validateCurriculum } from '../app/curriculum';
 import { cancellationId } from '../app/schedule';
 import {validateSpsSnapshot} from '../app/sps-integration';
 import {timingSafeEqual} from 'node:crypto';
+import {Accounts,AccountError,type AccountEnv} from './accounts';
 
-type Env = {
+type Env = AccountEnv & {
   BOOKINGS: DurableObjectNamespace<BookingState>;
   ALLOWED_ORIGINS: string;
   FRONTEND_URL: string;
@@ -38,12 +39,14 @@ export function validateSnapshot(value: unknown): Snapshot {
 }
 
 export class BookingState extends DurableObject<Env> {
+  private accounts:Accounts;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS booking_state (
       id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL
     )`);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+    this.accounts=new Accounts(ctx,env);
   }
 
   private read(): Snapshot {
@@ -57,13 +60,41 @@ export class BookingState extends DurableObject<Env> {
   private broadcast(revision: number) {
     const message = JSON.stringify({ type: 'booking-state-changed', revision });
     for (const socket of this.ctx.getWebSockets()) {
+      const tokenHash=socket.deserializeAttachment()?.tokenHash;
+      if(!tokenHash||!this.accounts.tokenValid(tokenHash)){socket.close(1008,'Sign in again');continue}
       try { socket.send(message); } catch { try { socket.close(1011, 'Reconnect'); } catch {} }
     }
   }
 
   async fetch(request: Request): Promise<Response> {
-    const path = new URL(request.url).pathname;
+    const origin=request.headers.get('origin');
+    const allowed=this.env.ALLOWED_ORIGINS.split(',').map(s=>s.trim()).includes(origin||'');
+    let response:Response;
+    try {
+      if(origin&&!allowed)throw new AccountError(403,'请求来源无效');
+      if(request.method==='OPTIONS'){
+        if(!allowed)throw new AccountError(403,'请求来源无效');
+        response=json({});response.headers.set('Access-Control-Allow-Methods','GET, POST, DELETE, OPTIONS');response.headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');
+      }else response=await this.route(request);
+    }catch(error){response=json({ok:false,error:error instanceof AccountError?error.message:'服务暂时不可用，请稍后重试'},error instanceof AccountError?error.status:503)}
+    if(response.status!==101){if(allowed)response.headers.set('Access-Control-Allow-Origin',origin!);response.headers.set('Vary','Origin');response.headers.set('X-Content-Type-Options','nosniff')}
+    return response;
+  }
+  private async route(request:Request):Promise<Response>{
+    // Match the shared handler's normalization before applying authentication.
+    const path = new URL(request.url).pathname.replace(/\/$/,'');
     const origins = this.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean);
+    if(path.startsWith('/api/auth/')){
+      if(request.method==='POST'&&!origins.includes(request.headers.get('origin')||''))throw new AccountError(403,'请求来源无效');
+      try{
+        const data=await this.accounts.handle(request);
+        for(const socket of this.ctx.getWebSockets()){
+          const tokenHash=socket.deserializeAttachment()?.tokenHash;
+          if(!tokenHash||!this.accounts.tokenValid(tokenHash))socket.close(1008,'Sign in again');
+        }
+        return json({ok:true,data});
+      }finally{await this.accounts.schedule()}
+    }
     if(path==='/api/integrations/sps'){
       const supplied=request.headers.get('authorization') || '',expected='Bearer '+this.env.SPS_SYNC_KEY;
       if(!this.env.SPS_SYNC_KEY || !this.env.SPS_CLUB_ID || Buffer.byteLength(supplied)!==Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(supplied),Buffer.from(expected)))return json({error:'Not found'},404);
@@ -106,11 +137,13 @@ export class BookingState extends DurableObject<Env> {
       if (!origins.includes(request.headers.get('origin') || '')) return json({ error: '请求来源无效' }, 403);
       if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
         return json({ error: 'WebSocket required' }, 426);
+      const tokenHash=this.accounts.takeTicket(new URL(request.url).searchParams.get('ticket'));
       let revision: number;
       try { revision = this.read().revision; } catch { return json({ error: '正在迁移数据，请稍后刷新再试' }, 503); }
       if (this.ctx.getWebSockets().length >= 500) return json({ error: '连接过多，请稍后重试' }, 503);
       const pair = new WebSocketPair();
-      this.ctx.acceptWebSocket(pair[1]);
+      this.ctx.acceptWebSocket(pair[1],[tokenHash]);
+      pair[1].serializeAttachment({tokenHash});
       pair[1].send(JSON.stringify({ type: 'booking-state-changed', revision }));
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
@@ -122,25 +155,35 @@ export class BookingState extends DurableObject<Env> {
       response.headers.set('Vary', 'Origin');
       return response;
     }
+    const actor=['/api/bookings','/api/curriculum'].includes(path)?this.accounts.authenticate(request,true).user:undefined;
+    if(actor&&request.method!=='GET')this.accounts.limit('booking-write:'+actor.id,60,60000);
     const handler = createHandler({
       read: async () => this.read(),
       compareAndSet: async (revision, state) => {
         // One conditional SQL statement decides the winner. The shared handler
         // reloads and checks all conflicts again when a competing writer wins.
-        const result = this.ctx.storage.sql.exec(
-          'UPDATE booking_state SET revision = ?, payload = ? WHERE id = 1 AND revision = ? RETURNING id',
-          revision + 1, JSON.stringify(state), revision
-        );
-        return result.toArray().length === 1;
+        return this.ctx.storage.transactionSync(()=>{
+          const before=this.read();if(before.revision!==revision)return false;
+          const result=this.ctx.storage.sql.exec('UPDATE booking_state SET revision=?,payload=? WHERE id=1 AND revision=? RETURNING id',revision+1,JSON.stringify(state),revision);
+          if(result.toArray().length!==1)return false;
+          if(actor){
+            for(const b of state.bookings)if(!before.state.bookings.some(old=>old.id===b.id))this.accounts.bookingNotice(actor,'created',b,revision+1);
+            for(const b of before.state.bookings)if(!state.bookings.some(next=>next.id===b.id))this.accounts.bookingNotice(actor,'cancelled',b,revision+1);
+          }
+          return true;
+        });
       },
-    }, async revision => this.broadcast(revision), origins);
+    }, async revision => this.broadcast(revision), origins,actor);
     const result = await handler({
       path, httpMethod: request.method,
       headers: Object.fromEntries(request.headers),
       body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.text(),
     });
+    await this.accounts.schedule();
     return new Response(result.body, { status: result.statusCode, headers: result.headers });
   }
+
+  async alarm(){await this.accounts.pump()}
 
   webSocketMessage(socket: WebSocket) { socket.close(1008, 'Read-only connection'); }
   webSocketClose(socket: WebSocket, code: number) { socket.close(code === 1005 ? 1000 : code); }

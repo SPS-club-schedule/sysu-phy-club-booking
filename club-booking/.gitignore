@@ -44,3 +44,13 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Android build products and local signing configuration
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/src/main/assets/www/
+/android/local.properties
+/android/signing.properties
+*.jks
+*.keystore

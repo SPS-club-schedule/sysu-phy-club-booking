@@ -1,3 +1,4 @@
+import {mailBindings,outboundService,verifiedSession} from './auth-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
@@ -18,24 +19,27 @@ test('SPS intervals split at Shanghai midnight, clip display range and preserve 
 test('authenticated source snapshots update atomically, ignore stale retries and preserve manual bookings/curriculum',async()=>{
   const bundle=await build({entryPoints:['worker/cloudflare.ts'],bundle:true,write:false,format:'esm',platform:'node',external:['cloudflare:workers']});
   const origin='https://sps-club-schedule.github.io',key='test-only-sync-key';
-  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],durableObjects:{BOOKINGS:{className:'BookingState',useSQLite:true}},bindings:{ALLOWED_ORIGINS:origin,FRONTEND_URL:origin,MIGRATION_TOKEN:'test-only-migrate',SPS_SYNC_KEY:key,SPS_CLUB_ID:sourceId}});
-  const req=(path,method='GET',body,token)=>mf.dispatchFetch('https://booking.test'+path,{method,headers:{origin,...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],durableObjects:{BOOKINGS:{className:'BookingState',useSQLite:true}},outboundService,bindings:{...mailBindings,ALLOWED_ORIGINS:origin,FRONTEND_URL:origin,MIGRATION_TOKEN:'test-only-migrate',SPS_SYNC_KEY:key,SPS_CLUB_ID:sourceId}});
+  let session;
+  const req=(path,method='GET',body,token=session?.token)=>mf.dispatchFetch('https://booking.test'+path,{method,headers:{origin,'Content-Type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const manual={id:'00000000-0000-4000-8000-000000000001',club:'学生会',activity:'Manual',location:'教室',date,start:'12:00',end:'13:00'};
   const curriculum={version:1,timetables:[]};
   try{
+    session=await verifiedSession(mf,origin);const other=await verifiedSession(mf,origin,'torchwood');
     assert.equal((await req('/__migration','POST',{revision:3,state:{bookings:[manual],curriculum}},'test-only-migrate')).status,201);
     assert.equal((await req('/api/integrations/sps','PUT',snapshot)).status,404);
     assert.equal((await req('/api/integrations/sps','PUT',{...snapshot,sourceId:'other'},key)).status,400);
     const ws=await req('/api/updates','GET');assert.equal(ws.status,426);
-    const live=await mf.dispatchFetch('https://booking.test/api/updates',{headers:{origin,upgrade:'websocket'}});const socket=live.webSocket;socket.accept();let updated=false;socket.addEventListener('message',e=>{if(JSON.parse(e.data).revision>=4)updated=true});
+    const ticket=(await (await req('/api/auth/live-ticket','POST',{})).json()).data.ticket;
+    const live=await mf.dispatchFetch('https://booking.test/api/updates?ticket='+ticket,{headers:{origin,upgrade:'websocket'}});const socket=live.webSocket;socket.accept();let updated=false;socket.addEventListener('message',e=>{if(JSON.parse(e.data).revision>=4)updated=true});
     assert.equal((await req('/api/integrations/sps','PUT',snapshot,key)).status,200);
     let body=await (await req('/api/bookings')).json();assert.equal(body.bookings.length,3);assert.deepEqual(body.curriculum,curriculum);assert.equal(body.revision,4);
     const block=body.bookings.find(b=>b.source==='sps-schedule');assert.equal((await req('/api/bookings','DELETE',{id:block.id,confirmed:true})).status,403);
     const feed=await (await req('/api/activities')).json();assert.equal(feed.activities.length,3);assert.equal('curriculum' in feed,false);assert.equal(feed.activities[1].club,'SPS');
     const same={club:'SPS',activity:'Overlap',location:'x',date,start:'23:10',end:'23:20'};
     assert.equal((await req('/api/bookings','POST',same)).status,409);
-    const cross=await req('/api/bookings','POST',{...same,club:'torchwood'});assert.equal((await cross.json()).kind,'conflict');
-    assert.equal((await req('/api/bookings','POST',{...same,club:'torchwood',accepted:[block.id]})).status,201);
+    const cross=await req('/api/bookings','POST',{...same,club:'torchwood'},other.token);assert.equal((await cross.json()).kind,'conflict');
+    assert.equal((await req('/api/bookings','POST',{...same,club:'torchwood',accepted:[block.id]},other.token)).status,201);
     const removed={...snapshot,version:6,events:[]};await req('/api/integrations/sps','PUT',removed,key);
     await req('/api/integrations/sps','PUT',snapshot,key);body=await (await req('/api/bookings')).json();assert.equal(body.bookings.length,2);assert.ok(body.bookings.some(b=>b.id===manual.id));
     const current=body.revision;await req('/api/integrations/sps','PUT',removed,key);assert.equal((await (await req('/api/bookings')).json()).revision,current);

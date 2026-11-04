@@ -9,7 +9,7 @@ function publicSnapshot(state:State,revision:number){return {revision,today:toda
 export type Store = { read(): Promise<{ revision: number; state: State }>; compareAndSet(revision: number, state: State): Promise<boolean> };
 const ORIGINS = ['https://sps-club-schedule.github.io', 'https://farawayshore.github.io'];
 type Event = { path?: string; httpMethod?: string; headers?: Record<string,string>; body?: string; isBase64Encoded?: boolean };
-export function createHandler(store: Store, notify?: (revision:number)=>Promise<void>, origins:readonly string[]=ORIGINS) {
+export function createHandler(store: Store, notify?: (revision:number)=>Promise<void>, origins:readonly string[]=ORIGINS, actor?:{id:string;club:string}) {
  return async (event: Event = {}) => {
   const headers: Record<string,string> = { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', Vary:'Origin' };
   const incoming = Object.fromEntries(Object.entries(event.headers || {}).map(([k,v])=>[k.toLowerCase(),v]));
@@ -22,7 +22,7 @@ export function createHandler(store: Store, notify?: (revision:number)=>Promise<
   if(incoming.origin && !allowedOrigin)return reply({error:'请求来源无效'},403);
   const path=event.path.replace(/\/$/,'');
   if(!['/api/bookings','/api/curriculum','/api/activities'].includes(path))return reply({error:'接口不存在'},404);
-  if(method==='OPTIONS'){headers['Access-Control-Allow-Methods']='GET, POST, DELETE';headers['Access-Control-Allow-Headers']='Content-Type';return reply({},200)}
+  if(method==='OPTIONS'){headers['Access-Control-Allow-Methods']='GET, POST, DELETE';headers['Access-Control-Allow-Headers']='Content-Type, Authorization';return reply({},200)}
   if(path!=='/api/bookings' && method!=='GET')return reply({error:'不支持的操作'},405);
   if(!['GET','POST','DELETE'].includes(method))return reply({error:'不支持的操作'},405);
   if(method!=='GET' && !allowedOrigin)return reply({error:'请求来源无效'},403);
@@ -39,10 +39,12 @@ export function createHandler(store: Store, notify?: (revision:number)=>Promise<
    if(method==='DELETE' && typeof body?.id==='string' && body.id.startsWith('sps:'))return reply({error:'此活动由 SPS 日程同步，请在 SPS 日程中修改或归档'},403);
    const id=method==='DELETE'?cancellationId(body):randomUUID();
    if(method==='DELETE'&&!id)return reply({error:'请确认要取消的预约'},400);
-   if(method==='POST'){const error=validate(body);if(error)return reply({error},400)}
+   if(method==='POST'){const error=validate(body);if(error)return reply({error},400);if(actor&&body.club!==actor.club)return reply({error:'只能以自己所属社团的身份预约'},403)}
    for(let attempt=0;attempt<5;attempt++){
     const {revision,state}=await store.read();
     if(method==='DELETE'){
+     const existing=state.bookings.find(b=>b.id===id);
+     if(actor&&existing&&existing.club!==actor.club)return reply({error:'只能管理自己所属社团的预约'},403);
      if(!state.bookings.some(b=>b.id===id))return reply({id,cancelled:true,snapshot:publicSnapshot(state,revision)});
      state.bookings=state.bookings.filter(b=>b.id!==id);
     }else{
