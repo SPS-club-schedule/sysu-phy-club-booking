@@ -194,7 +194,7 @@ export class Accounts {
    });
   }
   const auth=path==='logout'?this.authenticate(request):await this.currentSession(request),row=this.account(auth.user.id)!;
-  if (row.id.startsWith('sps:') && (path==='verify' || path==='resend')) fail(403,'请在 SPS 日程的账号设置中验证邮箱');
+  if (row.id.startsWith('sps:') && (path==='verify' || path==='resend' || path==='change-email')) fail(403,'请在 SPS 日程的账号设置中验证邮箱');
   if (path === 'club-contact') {
    if (!row.verified) fail(403, '请先验证邮箱');
    if (data.club !== undefined && data.club !== row.club) fail(403, '只能修改本社团的负责人邮箱');
@@ -210,13 +210,29 @@ export class Accounts {
    this.limit('verify-code:'+row.id,10,15*60000);this.checkCode(row,'verify',data.code);
    this.sql.exec('UPDATE booking_accounts SET verified=1 WHERE id=?',row.id);return {user:publicUser({...row,verified:1})};
   }
+  if(path==='change-email'){
+   if(row.verified)fail(409,'邮箱已验证，请刷新页面');
+   this.limit('change-email:'+row.id,10,15*60000);
+   if(typeof data.currentPassword!=='string'||!data.currentPassword)fail(400,'请重新输入当前登录密码以修改邮箱');
+   const pass=password(data.currentPassword);
+   const account=this.sql.exec<Row>('SELECT * FROM booking_accounts WHERE id=?',row.id).toArray()[0];
+   if(!account||!equal(digest(pass,account.salt),account.password_hash))fail(403,'当前密码不正确，请重新输入');
+   const next=email(data.email);
+   if(next===row.email)fail(400,'请输入新的邮箱地址；原邮箱收不到邮件时可重新发送验证码');
+   if(this.sql.exec('SELECT id FROM booking_accounts WHERE email=? AND id<>?',next,row.id).toArray().length)fail(409,'该邮箱已被使用');
+   // Password-confirmed corrections can happen immediately after registration.
+   // Invalidate the old code and queued mail atomically; hourly mail limits remain.
+   return this.ctx.storage.transactionSync(()=>{
+    this.sql.exec('DELETE FROM booking_mail WHERE id IN (SELECT id FROM booking_challenges WHERE account_id=?)',row.id);
+    this.sql.exec('DELETE FROM booking_challenges WHERE account_id=?',row.id);
+    this.sql.exec('UPDATE booking_accounts SET email=?,verified=0 WHERE id=?',next,row.id);
+    this.challenge({...row,email:next,verified:0},'verify');
+    return {user:publicUser({...row,email:next,verified:0})};
+   });
+  }
   if(path==='resend'){
+   if(data.email!==undefined&&email(data.email)!==row.email)fail(400,'修改邮箱需要确认登录密码，请刷新网页后点击“邮箱填错了？修改邮箱”');
    if(row.verified)return {user:publicUser(row)};
-   if(data.email!==undefined){const next=email(data.email);if(next!==row.email){
-    if(this.sql.exec('SELECT id FROM booking_accounts WHERE email=? AND id<>?',next,row.id).toArray().length)fail(409,'该邮箱已被使用');
-    // Updating a pending email and its challenge commits together.
-    return this.ctx.storage.transactionSync(()=>{this.sql.exec('UPDATE booking_accounts SET email=? WHERE id=?',next,row.id);this.challenge({...row,email:next},'verify');return {user:publicUser({...row,email:next})}});
-   }}
    this.challenge(row,'verify');return {user:publicUser(row)};
   }
   if(path==='live-ticket'){

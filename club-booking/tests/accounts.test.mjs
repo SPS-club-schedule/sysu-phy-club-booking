@@ -93,10 +93,67 @@ test('unverified accounts cannot read shared data, email changes keep verificati
   await waitFor(()=>sent.some(m=>m.to[0]===payload.email));
   const code=sent.find(m=>m.to[0]===payload.email).text.match(/验证码为：(\d{6})/)[1];
   assert.equal((await request(mf,'/api/auth/verify',{code},session.token)).status,400);
-  assert.equal((await request(mf,'/api/auth/resend',{email:'changed@example.test'},session.token)).status,429);
+  assert.equal((await request(mf,'/api/auth/resend',{email:'changed@example.test'},session.token)).status,400);
+  assert.equal((await request(mf,'/api/auth/resend',{},session.token)).status,429);
   assert.equal((await (await request(mf,'/api/auth/me',undefined,session.token)).json()).data.user.email,payload.email);
   await mf.setOptions({...options,bindings:{...options.bindings,RESEND_API_KEY:''}});
   assert.equal((await request(mf,'/api/auth/register',{...payload,username:'other_user',email:'other@example.test'})).status,503);
+ }finally{await mf.dispose()}
+});
+
+test('a mistyped pending email is corrected with the current password and only the new inbox can verify', {timeout:30000}, async()=>{
+ const mf=new Miniflare(options);
+ try{
+  const payload={username:'email_typo',email:'typo@example.test',password:'Test-password-123',club:'学生会'};
+  const session=(await (await request(mf,'/api/auth/register',payload)).json()).data;
+  const current=async()=> (await (await request(mf,'/api/auth/me',undefined,session.token)).json()).data.user;
+  const change=(data,token=session.token)=>request(mf,'/api/auth/change-email',data,token);
+  const next='corrected@example.test';
+  await waitFor(()=>sent.some(m=>m.to[0]===payload.email));
+  const oldCode=sent.find(m=>m.to[0]===payload.email).text.match(/验证码为：(\d{6})/)[1];
+  assert.equal((await change({email:next,currentPassword:payload.password},null)).status,401);
+  assert.equal((await change({email:next})).status,400);
+  assert.equal((await change({email:next,currentPassword:'Incorrect-password-123'})).status,403);
+  assert.equal((await change({email:'bad-address',currentPassword:payload.password})).status,400);
+  assert.equal((await change({email:payload.email,currentPassword:payload.password})).status,400);
+  assert.equal((await request(mf,'/api/auth/resend',{email:next},session.token)).status,400);
+  assert.equal((await current()).email,payload.email);
+  assert.ok(!sent.some(m=>m.to[0]===next));
+  const other=await verifiedSession(mf,origin,'SPS');
+  assert.equal((await change({email:other.email,currentPassword:payload.password})).status,409);
+  // No wait, old inbox code, or old inbox access is needed to correct the address.
+  const result=await change({email:next,currentPassword:payload.password,accountId:other.user.id});
+  assert.equal(result.status,200,await result.clone().text());
+  const updated=(await result.json()).data.user;
+  assert.equal(updated.id,session.user.id);assert.equal(updated.email,next);assert.equal(updated.emailVerified,false);
+  assert.equal((await (await request(mf,'/api/auth/me',undefined,other.token)).json()).data.user.email,other.email);
+  assert.equal((await request(mf,'/api/bookings',undefined,session.token)).status,403);
+  await waitFor(()=>sent.some(m=>m.to[0]===next));
+  const newCode=sent.find(m=>m.to[0]===next).text.match(/验证码为：(\d{6})/)[1];
+  // Codes are random: a coincidental numeric match is the new code, too.
+  if(oldCode!==newCode)assert.equal((await request(mf,'/api/auth/verify',{code:oldCode},session.token)).status,400);
+  assert.equal((await request(mf,'/api/auth/resend',{},session.token)).status,429);
+  assert.equal((await request(mf,'/api/auth/verify',{code:newCode},session.token)).status,200);
+  assert.equal((await current()).emailVerified,true);
+  assert.equal((await request(mf,'/api/auth/verify',{code:newCode},session.token)).status,400);
+  assert.equal((await request(mf,'/api/auth/login',{username:payload.username,password:payload.password})).status,200);
+ }finally{await mf.dispose()}
+});
+
+test('email correction rolls back when mail is unavailable and limits password guesses', {timeout:30000}, async()=>{
+ const mf=new Miniflare(options);
+ try{
+  const payload={username:'email_rollback',email:'rollback@example.test',password:'Test-password-123',club:'SPS'};
+  const session=(await (await request(mf,'/api/auth/register',payload)).json()).data;
+  await waitFor(()=>sent.some(m=>m.to[0]===payload.email));
+  const oldCode=sent.find(m=>m.to[0]===payload.email).text.match(/验证码为：(\d{6})/)[1];
+  await mf.setOptions({...options,bindings:{...options.bindings,RESEND_API_KEY:''}});
+  assert.equal((await request(mf,'/api/auth/change-email',{email:'rollback-new@example.test',currentPassword:payload.password},session.token)).status,503);
+  const current=(await (await request(mf,'/api/auth/me',undefined,session.token)).json()).data.user;
+  assert.equal(current.email,payload.email);assert.equal(current.emailVerified,false);
+  for(let i=0;i<9;i++)assert.equal((await request(mf,'/api/auth/change-email',{email:'rollback-new@example.test',currentPassword:'Incorrect-password-123'},session.token)).status,403);
+  assert.equal((await request(mf,'/api/auth/change-email',{email:'rollback-new@example.test',currentPassword:payload.password},session.token)).status,429);
+  assert.equal((await request(mf,'/api/auth/verify',{code:oldCode},session.token)).status,200);
  }finally{await mf.dispose()}
 });
 
@@ -188,6 +245,7 @@ test('SPS identity is separate from a colliding local username and email; revoca
    const manual=async(provider,password)=>request(member,'/api/auth/login',{provider,username:identity.username,password});
    const login=await manual('sps','Sps-only-password!');assert.equal(login.status,200,login.ok?'':(await login.clone().text())+' '+JSON.stringify(calls));
    const session=(await login.json()).data;assert.equal(session.user.id,'sps:'+id);assert.equal(session.user.club,'SPS');assert.ok(session.user.emailVerified);assert.equal(session.user.email,identity.email);
+   assert.equal((await request(member,'/api/auth/change-email',{email:'replacement@example.test',currentPassword:'Sps-only-password!'},session.token)).status,403);
    const local=await manual('local',identity.password);assert.equal((await local.json()).data.user.club,'torchwood');
    assert.equal((await manual('local','Sps-only-password!')).status,401);
    assert.equal((await manual('sps',identity.password)).status,401);

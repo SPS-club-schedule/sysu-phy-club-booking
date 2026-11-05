@@ -16,6 +16,7 @@ export default function AuthGate({children}:{children:(user:User,logout:()=>void
  const [remember,setRemember]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
  const [native,setNative]=useState(false),[checkFailed,setCheckFailed]=useState(false);
  const [retry,setRetry]=useState(0);
+ const [editingEmail,setEditingEmail]=useState(false),[emailPassword,setEmailPassword]=useState('');
  useEffect(()=>{setSession(readSession());setNative(!!window.BookingNative);setChecking(false);const sync=()=>setSession(readSession());window.addEventListener('booking-auth-change',sync);return()=>window.removeEventListener('booking-auth-change',sync)},[]);
  useEffect(()=>{
   if(!session){setChecking(false);return}
@@ -27,7 +28,8 @@ export default function AuthGate({children}:{children:(user:User,logout:()=>void
  },[session?.token,retry]);
  function switchMode(next:typeof mode){setMode(next);setPass('');setCode('');setError('');setMessage('')}
  async function run(action:()=>Promise<void>){if(busy)return;setBusy(true);setError('');setMessage('');try{await action()}catch(e){setError(e instanceof Error?e.message:'操作未完成，请重试')}finally{setBusy(false)}}
- async function logout(){await run(async()=>{try{await authRequest('logout',{})}catch(e){if((e as {status?:number}).status!==401)throw e}saveSession(null,'logout');setPass('');setCode('');setMode('login')})}
+ function editEmail(open:boolean){setEditingEmail(open);setEmailPassword('');setAddress(open?'':session?.user.email||'');setCode('');setError('');setMessage('')}
+ async function logout(){await run(async()=>{try{await authRequest('logout',{})}catch(e){if((e as {status?:number}).status!==401)throw e}saveSession(null,'logout');setPass('');setCode('');setEmailPassword('');setEditingEmail(false);setMode('login')})}
  async function submit(){await run(async()=>{
   const data=await authRequest<Session>(mode==='recover'?'reset':mode==='sps'?'login':mode,mode==='sps'?{provider:'sps',username:name,password:pass}:mode==='login'?{username:name,password:pass}:{username:name,password:pass,email:address,...(mode==='register'?{club}:{code})});
   rememberLogin(data,name,pass,remember);setPass('');setCode('');setAddress(data.user.email);
@@ -35,13 +37,25 @@ export default function AuthGate({children}:{children:(user:User,logout:()=>void
  if(session?.user.emailVerified&&!checking&&!checkFailed)return <>{error&&<div className="auth-global-error" role="alert">{error}</div>}{children(session.user,()=>void logout())}</>;
  return <main className="auth-page"><a className="auth-brand" href="#"><CalendarDays size={28}/>物院社团预约</a><section className="auth-card" aria-labelledby="auth-title">
   {checking?<><h1 id="auth-title">正在恢复登录</h1><p>正在确认账号信息…</p></>:session&&checkFailed?<><h1 id="auth-title">暂时无法连接</h1><p role="alert">{error}</p><button className="primary auth-submit" onClick={()=>setRetry(n=>n+1)}>重试</button><button className="auth-link" onClick={()=>{saveSession(null,'logout');setError('')}}>退出此账号</button></>:session?.user.id.startsWith('sps:')?<><h1>验证日程邮箱</h1><p>{session.user.username} · SPS</p><p>请在 SPS 日程的账号设置中验证邮箱，再从日历进入预约网站。</p><a className="auth-link" href="https://sps-club-schedule.github.io/sps-club-schedule/#/account" target="_blank" rel="noopener noreferrer">打开日程账号设置</a><button className="auth-link" onClick={()=>void logout()}>返回登录</button></>:session?<>
-   <h1 id="auth-title">验证你的邮箱</h1><p>{session.user.username} · {session.user.club}</p><p>输入邮件中的 6 位验证码，验证后即可查看课程和预约。</p>
+   <h1 id="auth-title">{editingEmail?'修改邮箱':'验证你的邮箱'}</h1><p>{session.user.username} · {session.user.club}</p>
+   {editingEmail?<>
+   <p>邮箱填错了？输入新邮箱，并重新输入当前登录密码确认。无需旧邮箱验证码，保存后只需验证新邮箱。</p>
+   <form onSubmit={e=>{e.preventDefault();void run(async()=>{try{const data=await authRequest('change-email',{email:address,currentPassword:emailPassword});saveSession({...session,user:data.user});setAddress(data.user.email);setCode('');setEditingEmail(false);setMessage('邮箱已修改，验证码已安排发送到新邮箱，请查看新邮箱。')}finally{setEmailPassword('')}})}}>
+    <label htmlFor="change-email">新邮箱</label><input id="change-email" type="email" value={address} onChange={e=>setAddress(e.target.value)} autoComplete="email" autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={busy}/>
+    <label htmlFor="email-password">当前登录密码</label><input id="email-password" type="password" value={emailPassword} onChange={e=>setEmailPassword(e.target.value)} autoComplete="current-password" minLength={10} maxLength={128} required disabled={busy}/>
+    <button className="primary auth-submit" disabled={busy}>{busy?'正在保存…':'确认修改并发送新验证码'}</button>
+   </form>
+   <button className="auth-link" disabled={busy} onClick={()=>editEmail(false)}>返回邮箱验证</button>
+   </>:<>
+   <p>输入邮件中的 6 位验证码，验证后即可查看课程和预约。</p>
    <form onSubmit={e=>{e.preventDefault();void run(async()=>{const data=await authRequest('verify',{code});saveSession({...session,user:data.user});setCode('')})}}>
-    <label htmlFor="verify-email">邮箱</label><input id="verify-email" type="email" value={address||session.user.email} onChange={e=>setAddress(e.target.value)} autoComplete="email" required/>
+    <label htmlFor="verify-email">当前邮箱</label><input id="verify-email" type="email" value={session.user.email} readOnly/>
     <label htmlFor="verify-code">验证码</label><input id="verify-code" value={code} onChange={e=>setCode(e.target.value)} inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required/>
     <button className="primary auth-submit" disabled={busy}>{busy?'正在验证…':'验证邮箱'}</button>
    </form>
-   <button className="auth-link" disabled={busy} onClick={()=>void run(async()=>{const data=await authRequest('resend',{email:address||session.user.email});saveSession({...session,user:data.user});setMessage('验证码已安排发送，请检查邮箱；再次发送需间隔一分钟。')})}>重新发送验证码 / 更新邮箱</button>
+   <button className="auth-link" disabled={busy} onClick={()=>editEmail(true)}>邮箱填错了？修改邮箱</button>
+   <button className="auth-link" disabled={busy} onClick={()=>void run(async()=>{const data=await authRequest('resend',{});saveSession({...session,user:data.user});setMessage('验证码已安排发送到当前邮箱，请检查邮箱；再次发送需间隔一分钟。')})}>重新发送验证码</button>
+   </>}
    <button className="auth-link" disabled={busy} onClick={()=>void logout()}><LogOut size={14}/>退出登录</button>
   </>:<>
    <h1 id="auth-title">{mode==='sps'?'SPS 日程账号登录':mode==='login'?'登录':mode==='register'?'注册账号':'找回密码'}</h1>
