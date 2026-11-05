@@ -4,6 +4,7 @@ import { validateCurriculum } from '../app/curriculum';
 import { cancellationId } from '../app/schedule';
 import {validateSpsSnapshot} from '../app/sps-integration';
 import {timingSafeEqual} from 'node:crypto';
+import {IdentityError} from './sps-login';
 import {Accounts,AccountError,type AccountEnv} from './accounts';
 
 type Env = AccountEnv & {
@@ -76,7 +77,7 @@ export class BookingState extends DurableObject<Env> {
         if(!allowed)throw new AccountError(403,'请求来源无效');
         response=json({});response.headers.set('Access-Control-Allow-Methods','GET, POST, DELETE, OPTIONS');response.headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');
       }else response=await this.route(request);
-    }catch(error){response=json({ok:false,error:error instanceof AccountError?error.message:'服务暂时不可用，请稍后重试'},error instanceof AccountError?error.status:503)}
+    }catch(error){const known=error instanceof AccountError || error instanceof IdentityError;response=json({ok:false,error:known?error.message:'服务暂时不可用，请稍后重试'},known?error.status:503)}
     if(response.status!==101){if(allowed)response.headers.set('Access-Control-Allow-Origin',origin!);response.headers.set('Vary','Origin');response.headers.set('X-Content-Type-Options','nosniff')}
     return response;
   }
@@ -159,7 +160,7 @@ export class BookingState extends DurableObject<Env> {
       response.headers.set('Vary', 'Origin');
       return response;
     }
-    const actor=['/api/bookings','/api/curriculum'].includes(path)?this.accounts.authenticate(request,true).user:undefined;
+    const actor=['/api/bookings','/api/curriculum'].includes(path)?(await this.accounts.currentSession(request,true)).user:undefined;
     if(actor&&request.method!=='GET')this.accounts.limit('booking-write:'+actor.id,60,60000);
     const handler = createHandler({
       read: async () => this.read(),

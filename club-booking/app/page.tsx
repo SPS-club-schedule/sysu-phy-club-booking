@@ -8,6 +8,7 @@ import {courseEntries,curriculumForBrowser,validCourseFilters,COURSE_TYPES,type 
 import CourseFilterPanel from './course-filter';
 import {placement} from './calendar-layout';
 import AuthGate from './auth-gate';
+import SpsEntry from './sps-entry';
 import ClubContact from './club-contact';
 import type {User} from './auth-session';
 const EMPTY_CURRICULUM:Curriculum={version:1,timetables:[]};
@@ -25,7 +26,7 @@ function BookingBlock({booking:b,style,onOpen,onMeasure}:{booking:CalendarEntry;
  return <button className={`booking ${b.kind==='course'?`course-booking course-${b.courseTone??'unknown'}`:`tone-${tone(b.club)}`}`} style={style} onClick={onOpen} aria-label={`${b.club}，${b.activity}，${b.hideLocation?'':`${b.location||'地点未填写'}，`}${b.start} 至 ${b.end}`} title={`${b.club}\n${b.activity}\n${b.hideLocation?'':`${b.location||'地点未填写'}\n`}${b.start}–${b.end}`}><div ref={contentRef} className="booking-content"><strong>{b.kind==='course'?`${b.club} · ${b.courseTone==='special'?'专属 · ':''}${(b.courseTypes??['unknown']).map(t=>COURSE_TYPES[t]).join(' / ')}`:b.club}</strong><span>{b.activity}</span>{!b.hideLocation&&<span className="booking-location">{b.location||'地点未填写'}</span>}<small>{timeLabel(b.start,b.end)}</small></div></button>
 }
 type CalendarProps={localOnly?:boolean;initialCurriculum?:Curriculum;subscribeUpdates?:SubscribeUpdates;user?:User;logout?:()=>void};
-export default function Home(props:CalendarProps={}){return props.localOnly?<BookingCalendar {...props}/>:<AuthGate>{(user,logout)=><BookingCalendar {...props} user={user} logout={logout}/>}</AuthGate>}
+export default function Home(props:CalendarProps={}){return props.localOnly?<BookingCalendar {...props}/>:<SpsEntry><AuthGate>{(user,logout)=><BookingCalendar {...props} user={user} logout={logout}/>}</AuthGate></SpsEntry>}
 function BookingCalendar({localOnly=false,initialCurriculum=EMPTY_CURRICULUM,subscribeUpdates,user,logout}:CalendarProps){
  const [courseFilters,setCourseFilters]=useState<CourseFilters>({});
  const [curriculum,setCurriculum]=useState<Curriculum>(initialCurriculum);const [selectedGrades,setSelectedGrades]=useState<string[]>([]);const [courseWarnings,setCourseWarnings]=useState<CalendarEntry[]|null>(null);const acceptedCoursesRef=useRef<string[]>([]);

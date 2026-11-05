@@ -20,6 +20,12 @@ class LoginClient {
         Failure(int status,String message){super(message);this.status=status;}
     }
     JSONObject login(String username,String password) throws Exception {
+        return request(username,password,false);
+    }
+    JSONObject loginSps(String username,String password) throws Exception {
+        return request(username,password,true);
+    }
+    private JSONObject request(String username,String password,boolean sps) throws Exception {
         HttpURLConnection connection=connections.open();
         try {
             connection.setInstanceFollowRedirects(false);
@@ -28,7 +34,9 @@ class LoginClient {
             connection.setRequestProperty("Content-Type","application/json; charset=utf-8");
             connection.setRequestProperty("Accept","application/json");
             connection.setRequestProperty("Origin",TrustedSite.ORIGIN);
-            byte[] body=new JSONObject().put("username",username).put("password",password).toString().getBytes(StandardCharsets.UTF_8);
+            JSONObject credentials=new JSONObject().put("username",username).put("password",password);
+            if(sps)credentials.put("provider","sps");
+            byte[] body=credentials.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(body.length);
             try(OutputStream output=connection.getOutputStream()){output.write(body);}
             int status=connection.getResponseCode();

@@ -76,13 +76,27 @@ public class AccountInstrumentedTest {
    assertFalse(disk.contains("Fictional-password"));assertFalse(disk.contains("native_test"));assertFalse(disk.contains("a".repeat(64)));
    js("window.__fixtureBeforeReload = true");instrument.runOnMainSync(web::reload);waitJs("window.__fixtureBeforeReload !== true && document.querySelector('.account-strip') !== null");
    assertEquals(2,logins.get());assertEquals("true",js("document.querySelector('#club').disabled && document.querySelector('#club').value === 'SPS'"));
-   logoutStatus.set(503);js("document.querySelector('.account-strip button').click()");waitJs("document.querySelector('.auth-global-error') !== null");assertTrue(vault.credentials().has("password"));
-   logoutStatus.set(200);js("document.querySelector('.account-strip button').click()");waitJs("document.querySelector('#auth-name') !== null");assertFalse(vault.credentials().has("password"));assertFalse(vault.read().has("session"));
+   logoutStatus.set(503);js("document.querySelector('.account-strip > button').click()");waitJs("document.querySelector('.auth-global-error') !== null");assertTrue(vault.credentials().has("password"));
+   logoutStatus.set(200);js("document.querySelector('.account-strip > button').click()");waitJs("document.querySelector('#auth-name') !== null");assertFalse(vault.credentials().has("password"));assertFalse(vault.read().has("session"));
    js("window.__fixtureBeforeReload = true");instrument.runOnMainSync(web::reload);waitJs("window.__fixtureBeforeReload !== true && document.querySelector('#auth-name') !== null");assertEquals(2,logins.get());
   }finally{finish();}
  }
  @Test public void uncheckingRememberStoresSessionWithoutPassword() throws Exception {
   try{launch();fillLogin();js("document.querySelector('.auth-remember input').click()");submit();waitJs("document.querySelector('.account-strip') !== null");assertFalse(new SessionVault(context).credentials().has("password"));assertTrue(new SessionVault(context).read().has("session"));}finally{finish();}
+ }
+ @Test public void savedScheduleIdentityUsesTheScheduleProvider() throws Exception {
+  ByteArrayOutputStream submitted=new ByteArrayOutputStream();
+  JSONObject expected=session();expected.getJSONObject("user").put("id","sps:"+"b".repeat(64));
+  JSONObject result=new JSONObject().put("ok",true).put("data",expected);
+  HttpURLConnection connection=new HttpURLConnection(new URL(LoginClient.ENDPOINT)){
+   public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}
+   public int getResponseCode(){return 200;}public java.io.OutputStream getOutputStream(){return submitted;}
+   public java.io.InputStream getInputStream(){return new ByteArrayInputStream(result.toString().getBytes(StandardCharsets.UTF_8));}
+  };
+  JSONObject signedIn=new LoginClient(()->connection).loginSps("native_test","Fictional-password-123");
+  assertEquals(expected.getJSONObject("user").getString("id"),signedIn.getJSONObject("user").getString("id"));
+  assertEquals("sps",new JSONObject(submitted.toString("UTF-8")).getString("provider"));
+  assertFalse(connection.getInstanceFollowRedirects());
  }
  @Test public void expiredSessionAutoLoginUsesNativePasswordAndNeverReturnsItToPage() throws Exception {
   try{

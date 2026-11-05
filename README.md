@@ -1,5 +1,8 @@
 # 物院社团时间预约
 
+SPS 在籍成员和管理员可以在登录页点「使用 SPS 日程账号登录」，用日程用户名和密码进入预约网站，所属社团为 SPS。日程日历中的「预约总览」和外部活动链接会在浏览器中带入当前日程账号。新浏览器会显示待切换的用户名。预约网站独立注册的账号仅用于预约系统。
+
+
 网站保持原 GitHub Pages 地址：https://sps-club-schedule.github.io/sysu-phy-club-booking/
 
 Cloudflare 后端：https://sysu-phy-club-book.folderrewind.top

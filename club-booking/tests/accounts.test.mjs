@@ -166,3 +166,41 @@ test('committed bookings notify the appropriate owners and club contacts once pe
   const publicBody=await (await request(mf,'/api/activities')).text();assert.ok(!publicBody.includes('@'));assert.ok(!publicBody.includes(incoming.username));
  } finally { await mf.dispose(); }
 });
+
+test('SPS identity is separate from a colliding local username and email; revocation stops an existing session', {timeout:30000}, async()=>{
+ const id='a'.repeat(64);
+ let active=true, revision=1,entryUsed=false;
+ const calls=[];
+ let identity;
+ const member=new Miniflare({...options,bindings:{...options.bindings,SPS_SYNC_KEY:'fixture-key'},outboundService:async req=>{
+     if(req.url==='https://api.resend.com/emails')return outboundService(req);
+     assert.equal(req.url,'https://sps-club-api.sysu-physics-clubs.workers.dev/integrations/booking/identity');
+     assert.equal(req.headers.get('authorization'),'Bearer fixture-key');
+     const body=await req.json();calls.push(body.operation);
+     if(!active)return Response.json({}, {status:403});
+     if(body.operation==='login' && body.password!=='Sps-only-password!') return Response.json({}, {status:401});
+     if(body.operation==='redeem'){if(entryUsed)return Response.json({},{status:401});entryUsed=true}
+     const external={id,username:identity.username,verifiedEmail:identity.email,revision};
+     return Response.json({ok:true,data:body.operation==='preview'?{username:external.username}:external});
+   }});
+ try {
+   identity=await verifiedSession(member,origin,'torchwood');
+   const manual=async(provider,password)=>request(member,'/api/auth/login',{provider,username:identity.username,password});
+   const login=await manual('sps','Sps-only-password!');assert.equal(login.status,200,login.ok?'':(await login.clone().text())+' '+JSON.stringify(calls));
+   const session=(await login.json()).data;assert.equal(session.user.id,'sps:'+id);assert.equal(session.user.club,'SPS');assert.ok(session.user.emailVerified);assert.equal(session.user.email,identity.email);
+   const local=await manual('local',identity.password);assert.equal((await local.json()).data.user.club,'torchwood');
+   assert.equal((await manual('local','Sps-only-password!')).status,401);
+   assert.equal((await manual('sps',identity.password)).status,401);
+   assert.equal((await request(member,'/api/auth/club-contact',{email:'sps-lead@example.test'},session.token)).status,200);
+   const entry=await request(member,'/api/auth/sps-entry',{code:'b'.repeat(64)});assert.equal(entry.status,200);
+   const second=(await entry.json()).data;assert.equal(second.user.id,session.user.id);
+   assert.equal((await request(member,'/api/auth/sps-entry',{code:'b'.repeat(64)})).status,401);
+   revision++;assert.equal((await request(member,'/api/auth/me',undefined,session.token)).status,401);
+   const fresh=(await (await manual('sps','Sps-only-password!')).json()).data;
+   active=false;
+   assert.equal((await request(member,'/api/bookings',undefined,fresh.token)).status,401);
+   assert.equal((await request(member,'/api/auth/live-ticket',{},fresh.token)).status,401);
+   assert.equal((await request(member,'/api/auth/me',undefined,identity.token)).status,200);
+   assert.ok(calls.includes('check'));
+ } finally { await member.dispose(); }
+});

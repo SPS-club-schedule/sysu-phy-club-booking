@@ -1,5 +1,8 @@
 # 物院社团预约 · Android
 
+SPS 在籍成员和管理员可以在登录页点「使用 SPS 日程账号登录」，用日程用户名和密码进入预约网站，所属社团为 SPS。日程日历中的「预约总览」和外部活动链接会在浏览器中带入当前日程账号。新浏览器会显示待切换的用户名。预约网站独立注册的账号仅用于预约系统。 App 记住密码时也记住所选账号来自哪个系统。
+
+
 完整 React 页面、CSS、图标与运行库内置在 APK。启动无需访问 GitHub Pages，不下载网页或外部字体。Android 8.0（API 26）以上，建议使用更新的 Android System WebView / Chrome。
 
 首次注册选择社团，填写用户名、密码及邮箱，完成邮箱验证码验证后使用；以后仅输入用户名和密码。与网页版共用账号和数据，所有成员可管理本社团全部普通预约，查看其他社团活动。课表需勾选“叠加年级课表”，可继续按专业、班型与课程性质筛选。SPS 自动同步活动通过详情里的“打开 SPS 任务”进入浏览器管理。
@@ -46,7 +49,7 @@ release 签名配置由环境变量 `BOOKING_ANDROID_SIGNING_PROPERTIES` 指向�
 ./gradlew testDebugUnitTest lintRelease assembleRelease
 ```
 
-包名 `org.spsclub.booking`，当前版本 `1.2.0` / code `3`，与 `org.spsclub.schedule` 并存。沿用 1.0.0 签名，可覆盖升级。后端新增登录保护后旧 App 必须升级。备份签名密钥和配置，不要把它们发给成员或放进源码包。
+包名 `org.spsclub.booking`，当前版本 `1.3.0` / code `4`，与 `org.spsclub.schedule` 并存。沿用 1.0.0 签名，可覆盖升级。后端新增登录保护后旧 App 必须升级。备份签名密钥和配置，不要把它们发给成员或放进源码包。
 
 ## 验证
 

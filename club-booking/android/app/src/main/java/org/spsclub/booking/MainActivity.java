@@ -163,7 +163,10 @@ public class MainActivity extends Activity {
         loginBusy=true;vault.delayAutoLogin(60000);
         loginExecutor.execute(()->{
             try{
-                JSONObject session=loginClient.login(credentials.getString("username"),credentials.getString("password"));
+                String name=credentials.getString("username"), pass=credentials.getString("password");
+                JSONObject session=credentials.getString("accountId").startsWith("sps:") ? loginClient.loginSps(name,pass) : loginClient.login(name,pass);
+                if (!credentials.getString("accountId").equals(session.getJSONObject("user").getString("id")))
+                    throw new LoginClient.Failure(401,"账号已变更，请重新登录");
                 runOnUiThread(()->{
                     if(isDestroyed()||generation!=loginGeneration)return;loginBusy=false;
                     try{installSession(vault.write(new JSONObject().put("session",session)));vault.delayAutoLogin(0);web.loadUrl(TrustedSite.HOME);}

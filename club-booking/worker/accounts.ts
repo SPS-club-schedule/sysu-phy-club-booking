@@ -1,10 +1,12 @@
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { CLUBS } from '../app/schedule';
+import { IdentityError, scheduleIdentity, type SpsIdentity } from './sps-login';
 import { BookingNotifications } from './booking-notifications';
 
 export type AccountUser = {id:string;username:string;club:string;email:string;emailVerified:boolean};
-export type AccountEnv = {RESEND_API_KEY?:string;EMAIL_FROM?:string;EMAIL_ENABLED?:string;FRONTEND_URL:string};
-type Row = {id:string;username:string;club:string;email:string;verified:number;salt:string;password_hash:string};
+export type AccountEnv = {SPS_SYNC_KEY?:string;RESEND_API_KEY?:string;EMAIL_FROM?:string;EMAIL_ENABLED?:string;FRONTEND_URL:string};
+type Profile = {id:string;username:string;club:string;email:string;verified:number};
+type Row = Profile & {salt:string;password_hash:string};
 type Session = {token_hash:string;account_id:string;expires_at:number};
 type Challenge = {id:string;account_id:string;kind:string;code_hash:string;expires_at:number;attempts:number;created_at:number};
 type Job = {id:string;payload:string;expires_at:number;attempts:number;next_at:number;created_at:number};
@@ -18,7 +20,7 @@ function fail(status:number,message:string):never{throw new AccountError(status,
 function username(v:unknown){if(typeof v!=='string'||!/^[a-zA-Z0-9_]{3,30}$/.test(v))fail(400,'用户名须为 3–30 位字母、数字或下划线');return v.toLowerCase()}
 function password(v:unknown){if(typeof v!=='string'||v.length<10||v.length>128)fail(400,'密码须为 10–128 个字符');return v}
 function email(v:unknown){if(typeof v!=='string'||v.length>254||! /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}$/.test(v.trim()))fail(400,'请填写有效的邮箱地址');return v.trim().toLowerCase()}
-const publicUser=(r:Row):AccountUser=>({id:r.id,username:r.username,club:r.club,email:r.email,emailVerified:!!r.verified});
+const publicUser=(r:Profile):AccountUser=>({id:r.id,username:r.username,club:r.club,email:r.email,emailVerified:!!r.verified});
 export async function jsonBody(request:Request,max=8192):Promise<Record<string,unknown>>{
  if(!(request.headers.get('content-type')||'').toLowerCase().startsWith('application/json'))fail(400,'请使用 JSON 请求');
  const reader=request.body?.getReader();if(!reader)fail(400,'请求内容为空');
@@ -35,6 +37,7 @@ export class Accounts {
   this.sql.exec(`CREATE TABLE IF NOT EXISTS booking_accounts (
     id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, club TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
     verified INTEGER NOT NULL DEFAULT 0,salt TEXT NOT NULL,password_hash TEXT NOT NULL,created_at INTEGER NOT NULL);
+   CREATE TABLE IF NOT EXISTS booking_sps_accounts (id TEXT PRIMARY KEY,username TEXT NOT NULL,email TEXT NOT NULL,verified INTEGER NOT NULL,revision INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS booking_sessions (token_hash TEXT PRIMARY KEY,account_id TEXT NOT NULL,expires_at INTEGER NOT NULL);
    CREATE INDEX IF NOT EXISTS booking_sessions_account ON booking_sessions(account_id);
    CREATE TABLE IF NOT EXISTS booking_auth_limits (key TEXT PRIMARY KEY,count INTEGER NOT NULL,expires_at INTEGER NOT NULL);
@@ -52,8 +55,39 @@ export class Accounts {
   if(row&&row.count>=max)fail(429,'尝试过于频繁，请稍后再试');
   this.sql.exec('INSERT INTO booking_auth_limits VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET count=count+1',keyHash,1,now+window);
  }
- private account(id:string){return this.sql.exec<Row>('SELECT * FROM booking_accounts WHERE id=?',id).toArray()[0]}
- private session(row:Row){
+ private account(id:string):Profile | undefined {
+  if (id.startsWith('sps:')) return this.sql.exec<Profile>("SELECT id,username,'SPS' AS club,email,verified FROM booking_sps_accounts WHERE id=?",id).toArray()[0];
+  return this.sql.exec<Row>('SELECT * FROM booking_accounts WHERE id=?',id).toArray()[0];
+ }
+ private saveSpsIdentity(identity:SpsIdentity, requireExistingSession=false) {
+  const id='sps:'+identity.id, address=identity.verifiedEmail.toLowerCase();
+  const previous=this.sql.exec<{revision:number}>('SELECT revision FROM booking_sps_accounts WHERE id=?',id).toArray()[0];
+  if (previous && previous.revision!==identity.revision) {
+   if (previous.revision>identity.revision) fail(401,'日程账号已更新，请重新登录');
+   this.sql.exec('DELETE FROM booking_sessions WHERE account_id=?',id);
+   if (requireExistingSession) fail(401,'日程账号已更新，请重新登录');
+  }
+  const verified=address ? 1 : 0;
+  this.sql.exec('INSERT INTO booking_sps_accounts VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,email=excluded.email,verified=excluded.verified,revision=excluded.revision',id,identity.username,address,verified,identity.revision);
+  return {id,username:identity.username,club:'SPS',email:address,verified};
+ }
+ async currentSession(request:Request, verified=false) {
+  const auth=this.authenticate(request);
+  if (auth.user.id.startsWith('sps:')) {
+   try {
+    const profile=await scheduleIdentity(this.env.SPS_SYNC_KEY,{operation:'check',id:auth.user.id.slice(4)});
+    this.saveSpsIdentity(profile,true);
+   } catch (e) {
+    if (e instanceof IdentityError && (e.status===401 || e.status===403)) {
+     this.sql.exec('DELETE FROM booking_sessions WHERE account_id=?',auth.user.id);
+     fail(401,'当前日程账号已无 SPS 预约权限，请重新登录');
+    }
+    throw e;
+   }
+  }
+  return this.authenticate(request,verified);
+ }
+ private session(row:Profile){
   const now=Date.now(),token=random(),expiresAt=now+7*DAY;
   this.sql.exec('DELETE FROM booking_sessions WHERE expires_at<=?',now);
   // Bound remembered sessions per account without invalidating ordinary reloads.
@@ -78,7 +112,7 @@ export class Accounts {
   if(!row||row.expires_at<=Date.now()||!this.tokenValid(row.token_hash))fail(401,'实时连接凭证已过期');
   return row.token_hash;
  }
- private challenge(row:Row,kind:'verify'|'reset'){
+ private challenge(row:Profile,kind:'verify'|'reset'){
   if(!this.configured())fail(503,'邮件服务暂时不可用，请稍后再试');
   this.limit('email-account:'+row.id,5,3600000);this.limit('email-target:'+row.email,5,3600000);
   const old=this.sql.exec<Challenge>('SELECT * FROM booking_challenges WHERE account_id=? AND kind=?',row.id,kind).toArray()[0];
@@ -90,7 +124,7 @@ export class Accounts {
   this.sql.exec('INSERT INTO booking_challenges VALUES(?,?,?,?,?,0,?) ON CONFLICT(account_id,kind) DO UPDATE SET id=excluded.id,code_hash=excluded.code_hash,expires_at=excluded.expires_at,attempts=0,created_at=excluded.created_at',id,row.id,kind,hash(id+':'+code),expiry,now);
   this.sql.exec('INSERT INTO booking_mail(id,payload,expires_at,next_at,created_at) VALUES(?,?,?,?,?)',id,JSON.stringify({from:this.env.EMAIL_FROM,to:[row.email],subject:`[物院社团预约] ${purpose}验证码`,text}),expiry,now,now);
  }
- private checkCode(row:Row,kind:string,code:unknown){
+ private checkCode(row:Profile,kind:string,code:unknown){
   const c=this.sql.exec<Challenge>('SELECT * FROM booking_challenges WHERE account_id=? AND kind=?',row.id,kind).toArray()[0];
   if(!c||c.expires_at<=Date.now()||c.attempts>=5)fail(400,'验证码错误或已过期，请重新发送');
   this.sql.exec('UPDATE booking_challenges SET attempts=attempts+1 WHERE id=?',c.id);
@@ -100,9 +134,9 @@ export class Accounts {
  async handle(request:Request){
   const path=new URL(request.url).pathname.replace('/api/auth/','');
   if(path==='config'&&request.method==='GET')return {clubs:CLUBS,emailEnabled:this.configured()};
-  if(path==='me'&&request.method==='GET'){const {user,expiresAt}=this.authenticate(request);return {user,expiresAt}}
+  if(path==='me'&&request.method==='GET'){const {user,expiresAt}=await this.currentSession(request);return {user,expiresAt}}
   if (path === 'club-contact' && request.method === 'GET') {
-   const {user} = this.authenticate(request, true);
+   const {user} = await this.currentSession(request, true);
    return {email: this.notifications.contact(user.club)};
   }
   if(request.method!=='POST')fail(405,'不支持的操作');
@@ -119,6 +153,19 @@ export class Accounts {
     this.sql.exec('INSERT INTO booking_accounts VALUES(?,?,?,?,?,?,?,?)',row.id,name,row.club,address,0,salt,row.password_hash,Date.now());
     this.challenge(row,'verify');return this.session(row);
    });
+  }
+  if (path==='sps-entry' || path==='sps-preview') {
+   if (typeof data.code!=='string' || !/^[a-f0-9]{64}$/.test(data.code)) fail(400,'跳转凭证无效，请从日历重新打开');
+   const profile=await scheduleIdentity(this.env.SPS_SYNC_KEY,{operation:path==='sps-entry'?'redeem':'preview',code:data.code});
+   if (path==='sps-preview') return {username:profile.username};
+   return this.ctx.storage.transactionSync(()=>this.session(this.saveSpsIdentity(profile)));
+  }
+  if (path==='login' && data.provider==='sps') {
+   const name=username(data.username), pass=password(data.password);
+   this.limit('sps-login:'+name,10,15*60000);
+   const profile=await scheduleIdentity(this.env.SPS_SYNC_KEY,{operation:'login',username:name,password:pass});
+   this.sql.exec('DELETE FROM booking_auth_limits WHERE key=?',hash('sps-login:'+name));
+   return this.ctx.storage.transactionSync(()=>this.session(this.saveSpsIdentity(profile)));
   }
   if(path==='login'){
    const name=username(data.username),pass=password(data.password);this.limit('login:'+name,10,15*60000);
@@ -146,7 +193,8 @@ export class Accounts {
     return this.session(row);
    });
   }
-  const auth=this.authenticate(request),row=this.account(auth.user.id)!;
+  const auth=path==='logout'?this.authenticate(request):await this.currentSession(request),row=this.account(auth.user.id)!;
+  if (row.id.startsWith('sps:') && (path==='verify' || path==='resend')) fail(403,'请在 SPS 日程的账号设置中验证邮箱');
   if (path === 'club-contact') {
    if (!row.verified) fail(403, '请先验证邮箱');
    if (data.club !== undefined && data.club !== row.club) fail(403, '只能修改本社团的负责人邮箱');

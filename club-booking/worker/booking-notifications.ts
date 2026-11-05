@@ -26,7 +26,7 @@ export class BookingNotifications {
 
   private creator(bookingId: string) {
     return this.sql.exec<{id: string; email: string}>(
-      `SELECT a.id,a.email FROM booking_creators c JOIN booking_accounts a ON a.id=c.account_id
+      `SELECT a.id,a.email FROM booking_creators c JOIN (SELECT id,email,verified FROM booking_accounts UNION ALL SELECT id,email,verified FROM booking_sps_accounts) a ON a.id=c.account_id
        WHERE c.booking_id=? AND a.verified=1`, bookingId
     ).toArray()[0];
   }
