@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Check Worker config matches the backend project
+        run: node club-booking/scripts/worker-build-config.mjs --check
       - name: Prepare website artifact
         run: |
           mkdir _site

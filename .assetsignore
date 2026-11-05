@@ -1,0 +1,3 @@
+# The repository root is never a Worker asset directory. Pages publishes its
+# own allowlist separately; even an accidental --assets . must upload nothing.
+*

@@ -30,6 +30,22 @@
 
 ## 验证与发布
 
-测试与发布结果在本文件后续补充。所有业务写入测试使用隔离 Miniflare 数据库和断网模拟器；不使用真实账号、收件人或生产预约作测试。
+- 全量 79 项 Node 测试、类型检查、12 项 SQL 冲突检查及框架构建通过；随后增加邮件重启重试、已过期会话恢复两项测试，相关后端 7 项和客户端 4 项均通过。验证 URL 尾部斜杠不会绕过身份及社团校验。
+- Android 15 模拟器离线 6 项测试通过：注册后的会话恢复、登录错误不存密码、加密保存、不勾选保存、原生自动登录、退出失败/成功处理、课程与其他社团展示、网络错误及重试。联网模式单独验证游客进入内置登录页。生产账号和预约未作测试写入。
+- Android 单元测试、lintRelease、签名 release 构建通过。APK 签名与 1.0.0 相同；模拟器安装初版后覆盖升级成功，versionCode=2、非 DEBUGGABLE。
+- 精简源码在独立目录完成 npm ci、前端导出、Android 单元测试及 debug 构建；前端产物与主工程逐字节一致。源码包 40 个文件，不包含构建产物或密钥。
+- Cloudflare 部署版本 `0eeb0b5e-db62-4963-b640-a432c1fc9344`，100% 流量。线上 `/api/auth/config` 返回邮件已启用，未登录课表/预约（含尾斜杠）均 401，迁移接口 404。公开活动响应与发布前逐项相同，revision46；既有 4 份课表、57 条课程规则及预约未初始化或覆盖。
+- Resend 独立密钥、域权限已在控制台检查；官方测试收件地址发送返回 200，邮件 ID `01a1a73d-f432-7ba6-9c35-911f83fd2335`。真实成员收件箱、垃圾箱及实体手机尚未实测。
+- GitHub Pages 工作流 41862850254 已成功。正式首页与发布文件 SHA-256 一致，浏览器已确认登录、注册选社团和找回密码页面。
+
+证据：`outputs/auth-all-tests.log`、`auth-backend-final.log`、`auth-client-final.log`、`auth-device-tests.log`、`auth-live-device-tests.log`、`auth-android-final-build.log`、`auth-deployment.log`、`auth-production-checks.json`、`resend-sandbox-check.json` 与 `outputs/android/SHA256SUMS.txt`。
 
 Android 为 `org.spsclub.booking` 1.1.0 / versionCode 2，完整前端内置，沿用初版签名。后台新增认证后，初版 1.0.0 必须覆盖升级。源码包不含密钥、签名配置、私有数据、SDK 或构建缓存。
+
+## 11 月 5 日：避免 Git 自动部署覆盖后端
+
+此前 Workers Builds 从仓库根目录将静态前端发布为 Worker，导致全部 API 404。现有组织仓库、后端域名和数据库均无需更换。GitHub Pages 和 Cloudflare 使用不同的发布入口：Pages 仅发布工作流中明确列出的静态文件；Workers Builds 读取根目录 `wrangler.jsonc`，运行 `club-booking/worker/cloudflare.ts`。仓库根目录禁止用作 Worker 的静态资源目录。
+
+根配置由 `node club-booking/scripts/worker-build-config.mjs > wrangler.jsonc` 根据源码目录的 `wrangler.leafuke.jsonc` 生成。两个配置均要求已存在 `RESEND_API_KEY` 和 `SPS_SYNC_KEY`，缺少任一密钥时上传应失败。已在不切流量的情况下验证缺密钥拦截，并核对正确候选版本的 API 入口、数据库命名空间及两项 secret 类型。
+
+不要仅凭 Deployments 中显示 100% 就推断下一次上传会继承此版本的密钥。普通上传默认继承最新**上传**的版本。如果它丢失密钥，可通过官方 Workers version API 使用 `type: inherit` 及明确的正常 `version_id` 在服务端恢复，保持原密钥不变；先比较模块和所有绑定，再切流量并回读 `/api/auth/config`。不要把密钥复制到代码或仓库。

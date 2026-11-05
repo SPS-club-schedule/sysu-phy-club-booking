@@ -7,6 +7,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "secrets": { "required": ["RESEND_API_KEY", "SPS_SYNC_KEY"] },
   "observability": { "enabled": true },
   "durable_objects": { "bindings": [{ "name": "BOOKINGS", "class_name": "BookingState" }] },
   "migrations": [{ "tag": "booking-state-v1", "new_sqlite_classes": ["BookingState"] }],

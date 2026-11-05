@@ -1,0 +1,43 @@
+{
+  "name": "sysu-phy-club-booking",
+  "account_id": "9b780cdb0cd2a083330601598d3ea9dc",
+  "main": "club-booking/worker/cloudflare.ts",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "secrets": {
+    "required": [
+      "RESEND_API_KEY",
+      "SPS_SYNC_KEY"
+    ]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BOOKINGS",
+        "class_name": "BookingState"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "booking-state-v1",
+      "new_sqlite_classes": [
+        "BookingState"
+      ]
+    }
+  ],
+  "vars": {
+    "EMAIL_ENABLED": "true",
+    "EMAIL_FROM": "物院社团预约 <booking@sps-schedule.folderrewind.top>",
+    "FRONTEND_URL": "https://sps-club-schedule.github.io/sysu-phy-club-booking/",
+    "SPS_CLUB_ID": "c_4b41fd4ed7f3812cb1c624261a986141",
+    "ALLOWED_ORIGINS": "https://sysu-phy-club-book.folderrewind.top,https://sysu-phy-club-booking.zhuolin-yew.workers.dev,https://sps-club-schedule.github.io,https://farawayshore.github.io"
+  }
+}
