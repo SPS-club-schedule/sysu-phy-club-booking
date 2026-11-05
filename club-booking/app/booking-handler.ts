@@ -6,7 +6,8 @@ import {spsBookings,activityFeed,type SpsSnapshot} from './sps-integration';
 export type State = { bookings: Booking[]; curriculum: Curriculum; sps?:SpsSnapshot };
 function publicBookings(state:State){const t=today();return [...state.bookings.filter(b=>b.date>=t&&b.date<=bookingEnd(t)),...spsBookings(state.sps,t)].sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start))}
 function publicSnapshot(state:State,revision:number){return {revision,today:today(),bookings:publicBookings(state),curriculum:state.curriculum}}
-export type Store = { read(): Promise<{ revision: number; state: State }>; compareAndSet(revision: number, state: State): Promise<boolean> };
+export type BookingChange = {kind: 'created'; booking: Booking; conflicts: Booking[]} | {kind: 'cancelled'; booking: Booking};
+export type Store = { read(): Promise<{ revision: number; state: State }>; compareAndSet(revision: number, state: State, change: BookingChange): Promise<boolean> };
 const ORIGINS = ['https://sps-club-schedule.github.io', 'https://farawayshore.github.io'];
 type Event = { path?: string; httpMethod?: string; headers?: Record<string,string>; body?: string; isBase64Encoded?: boolean };
 export function createHandler(store: Store, notify?: (revision:number)=>Promise<void>, origins:readonly string[]=ORIGINS, actor?:{id:string;club:string}) {
@@ -42,10 +43,12 @@ export function createHandler(store: Store, notify?: (revision:number)=>Promise<
    if(method==='POST'){const error=validate(body);if(error)return reply({error},400);if(actor&&body.club!==actor.club)return reply({error:'只能以自己所属社团的身份预约'},403)}
    for(let attempt=0;attempt<5;attempt++){
     const {revision,state}=await store.read();
+    let change: BookingChange;
     if(method==='DELETE'){
      const existing=state.bookings.find(b=>b.id===id);
      if(actor&&existing&&existing.club!==actor.club)return reply({error:'只能管理自己所属社团的预约'},403);
-     if(!state.bookings.some(b=>b.id===id))return reply({id,cancelled:true,snapshot:publicSnapshot(state,revision)});
+     if(!existing)return reply({id,cancelled:true,snapshot:publicSnapshot(state,revision)});
+     change = {kind: 'cancelled', booking: existing};
      state.bookings=state.bookings.filter(b=>b.id!==id);
     }else{
      const selected=body.selectedGrades??[];
@@ -58,11 +61,13 @@ export function createHandler(store: Store, notify?: (revision:number)=>Promise<
      if(courses.some(c=>!acceptedCourses.includes(c.confirmationKey)))return reply({kind:'course_conflict',conflicts:courses},409);
      const accepted=Array.isArray(body.accepted)?body.accepted.filter((x:unknown)=>typeof x==='string').slice(0,100):[];
      if(conflicts.some(b=>!accepted.includes(b.id)))return reply({kind:'conflict',conflicts},409);
-     state.bookings.push({id:id!,club:body.club,activity:body.activity.trim(),location:body.location.trim(),date:body.date,start:body.start,end:body.end});
+     const booking = {id:id!,club:body.club,activity:body.activity.trim(),location:body.location.trim(),date:body.date,start:body.start,end:body.end};
+     state.bookings.push(booking);
+     change = {kind: 'created', booking, conflicts};
     }
     // The database matches revision and writes the replacement in one atomic update.
     // A losing writer reloads and rechecks every conflict before retrying.
-    if(await store.compareAndSet(revision,state)){
+    if(await store.compareAndSet(revision,state,change)){
      let warning:string|undefined;
      if(notify){try{await notify(revision+1)}catch{warning='数据已保存，但更新推送未送出；其他页面可手动刷新。'}}
      return reply({id,...(method==='DELETE'?{cancelled:true}:{}),revision:revision+1,warning,snapshot:publicSnapshot(state,revision+1)},method==='DELETE'?200:201);

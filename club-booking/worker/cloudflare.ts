@@ -108,9 +108,13 @@ export class BookingState extends DurableObject<Env> {
       const current=this.read();
       if(current.state.sps && current.state.sps.sourceId!==snapshot.sourceId)return json({error:'Source mismatch'},409);
       if(current.state.sps && current.state.sps.version>=snapshot.version)return json({sourceVersion:current.state.sps.version,revision:current.revision});
-      current.state.sps=snapshot;
-      this.ctx.storage.sql.exec('UPDATE booking_state SET revision=?,payload=? WHERE id=1',current.revision+1,JSON.stringify(current.state));
+      this.ctx.storage.transactionSync(() => {
+        this.accounts.notifications.recordSpsChanges(current.state.sps, snapshot, current.state.bookings, current.revision + 1);
+        current.state.sps = snapshot;
+        this.ctx.storage.sql.exec('UPDATE booking_state SET revision=?,payload=? WHERE id=1',current.revision+1,JSON.stringify(current.state));
+      });
       this.broadcast(current.revision+1);
+      await this.accounts.schedule();
       return json({sourceVersion:snapshot.version,revision:current.revision+1});
     }
     if (path === '/__migration') {
@@ -159,17 +163,13 @@ export class BookingState extends DurableObject<Env> {
     if(actor&&request.method!=='GET')this.accounts.limit('booking-write:'+actor.id,60,60000);
     const handler = createHandler({
       read: async () => this.read(),
-      compareAndSet: async (revision, state) => {
+      compareAndSet: async (revision, state, change) => {
         // One conditional SQL statement decides the winner. The shared handler
         // reloads and checks all conflicts again when a competing writer wins.
         return this.ctx.storage.transactionSync(()=>{
-          const before=this.read();if(before.revision!==revision)return false;
           const result=this.ctx.storage.sql.exec('UPDATE booking_state SET revision=?,payload=? WHERE id=1 AND revision=? RETURNING id',revision+1,JSON.stringify(state),revision);
           if(result.toArray().length!==1)return false;
-          if(actor){
-            for(const b of state.bookings)if(!before.state.bookings.some(old=>old.id===b.id))this.accounts.bookingNotice(actor,'created',b,revision+1);
-            for(const b of before.state.bookings)if(!state.bookings.some(next=>next.id===b.id))this.accounts.bookingNotice(actor,'cancelled',b,revision+1);
-          }
+          if (actor) this.accounts.notifications.record(actor, change, revision + 1);
           return true;
         });
       },

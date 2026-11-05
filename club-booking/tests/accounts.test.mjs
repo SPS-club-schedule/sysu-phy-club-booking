@@ -51,11 +51,11 @@ test('accounts, verified email, club ownership, one-use websocket tickets, reset
   const me=await (await request(mf,'/api/auth/me',undefined,a.token)).json();assert.equal(me.data.user.club,'SPS');assert.equal(me.data.user.emailVerified,true);assert.ok(!JSON.stringify(me).includes('token_hash'));
   const booking={club:'SPS',activity:'Test booking',location:'Test room',date:addDays(today(),1),start:'08:00',end:'09:00'};
   const create=await request(mf,'/api/bookings',booking,a.token);assert.equal(create.status,201);const created=await create.json();
-  await waitFor(()=>sent.some(m=>m.to[0]===a.email&&m.subject.includes('预约成功')));
+  assert.ok(!sent.some(m=>m.to[0]===a.email&&m.subject.includes('预约成功')));
   const peer=await verifiedSession(mf,origin,'SPS');
   const shared=await (await request(mf,'/api/bookings',{...booking,start:'10:10',end:'11:50'},a.token)).json();
   assert.equal((await request(mf,'/api/bookings',{id:shared.id,confirmed:true},peer.token,'DELETE')).status,200);
-  await waitFor(()=>sent.some(m=>m.to[0]===peer.email&&m.subject.includes('预约已取消')));
+  await waitFor(()=>sent.some(m=>m.to[0]===a.email&&m.subject.includes('预约已取消')));
   assert.ok(!sent.some(m=>m.to[0]===b.email&&/预约成功|预约已取消/.test(m.subject)));
   assert.equal((await request(mf,'/api/bookings',booking,b.token)).status,403);
   assert.equal((await request(mf,'/api/bookings/',booking,b.token)).status,403);
@@ -87,6 +87,8 @@ test('unverified accounts cannot read shared data, email changes keep verificati
   const create=await request(mf,'/api/auth/register',payload);assert.equal(create.status,200);const session=(await create.json()).data;
   assert.equal((await request(mf,'/api/bookings',undefined,session.token)).status,403);
   assert.equal((await request(mf,'/api/auth/live-ticket',{},session.token)).status,403);
+  assert.equal((await request(mf,'/api/auth/club-contact',undefined,session.token)).status,403);
+  assert.equal((await request(mf,'/api/auth/club-contact',{email:'example@example.test'},session.token)).status,403);
   for(let i=0;i<5;i++)assert.equal((await request(mf,'/api/auth/verify',{code:'000000'},session.token)).status,400);
   await waitFor(()=>sent.some(m=>m.to[0]===payload.email));
   const code=sent.find(m=>m.to[0]===payload.email).text.match(/验证码为：(\d{6})/)[1];
@@ -96,4 +98,71 @@ test('unverified accounts cannot read shared data, email changes keep verificati
   await mf.setOptions({...options,bindings:{...options.bindings,RESEND_API_KEY:''}});
   assert.equal((await request(mf,'/api/auth/register',{...payload,username:'other_user',email:'other@example.test'})).status,503);
  }finally{await mf.dispose()}
+});
+
+test('committed bookings notify the appropriate owners and club contacts once per inbox', {timeout:60000}, async () => {
+ const mf = new Miniflare({...options, bindings: {...options.bindings, SPS_CLUB_ID:'test-club', SPS_SYNC_KEY:'test-sync'}});
+ const startIndex = sent.length;
+ const day = addDays(today(),1);
+ const booking = (club, activity, start='14:00', end='15:00') => ({club, activity, start, end, date:day, location:'测试活动室'});
+ const legacyId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+ const legacy = {...booking('学生会','历史活动','20:00','21:00'), id:legacyId};
+ const contactPath = '/api/auth/club-contact';
+ const post = (who, data) => request(mf,'/api/bookings',data,who.token);
+ const cancel = (who,id) => request(mf,'/api/bookings',{id,confirmed:true},who.token,'DELETE');
+ const setLead = (who,email,extra={}) => request(mf,contactPath,{email,...extra},who.token);
+ const leadOf = async who => (await (await request(mf,contactPath,undefined,who.token)).json()).data.email;
+ const received = title => sent.slice(startIndex).filter(m=>m.subject.endsWith(' · '+title));
+ const assertTo = (title,addresses) => assert.deepEqual(received(title).map(m=>{assert.equal(m.to.length,1);return m.to[0]}).sort(), [...addresses].sort(),title);
+ try {
+  assert.equal((await request(mf,'/__migration',{revision:1,state:{bookings:[legacy],curriculum:{version:1,timetables:[]}}},'test-only-seed')).status,201);
+  const original = await verifiedSession(mf,origin,'学生会'), peer = await verifiedSession(mf,origin,'学生会');
+  const incoming = await verifiedSession(mf,origin,'torchwood'), sps = await verifiedSession(mf,origin,'SPS');
+  assert.equal((await request(mf,contactPath)).status,401);
+  assert.equal(await leadOf(original),null);
+  assert.equal((await setLead(peer,'invalid')).status,400);
+  assert.equal((await setLead(peer,'wrong@example.test',{club:incoming.user.club})).status,403);
+  const lead = 'director@example.test';
+  assert.equal((await setLead(peer,lead.toUpperCase(),{previousEmail:null})).status,200);
+  assert.equal(await leadOf(original),lead);
+  assert.equal(await leadOf(incoming),null);
+  assert.equal((await setLead(original,'stale@example.test',{previousEmail:null})).status,409);
+  assert.equal((await setLead(incoming,incoming.email)).status,200);
+  const first = await (await post(original,booking('学生会','先预约'))).json();
+  const later = await (await post(original,booking('学生会','第二场','15:00','16:00'))).json();
+  await waitFor(()=>received('第二场').length>0);
+  assertTo('先预约',[lead]);
+  const newBooking=booking('torchwood','两场冲突','14:30','15:30');
+  assert.equal((await post(incoming,newBooking)).status,409);
+  assert.equal((await post(incoming,{...newBooking,accepted:[first.id]})).status,409);
+  assert.equal((await post(original,booking('学生会','同社团冲突'))).status,409);
+  assert.equal((await post(incoming,{...newBooking,accepted:[first.id,later.id]})).status,201);
+  await waitFor(()=>received('两场冲突').length>=3);
+  assertTo('两场冲突',[original.email,lead,incoming.email]);
+  for(const mail of received('两场冲突')){
+   for(const token of [incoming.username,'torchwood','两场冲突','14:30–15:30','先预约','第二场',day,'协商'])assert.ok(mail.text.includes(token),token);
+  }
+  assert.equal((await cancel(peer,first.id)).status,200);
+  assert.equal((await cancel(peer,first.id)).status,200);
+  await waitFor(()=>received('先预约').length>=3);
+  const cancelled = received('先预约').filter(m=>m.subject.includes('已取消'));
+  assert.deepEqual(cancelled.map(m=>m.to[0]).sort(),[original.email,lead].sort());
+  assert.ok(cancelled.every(m=>m.text.includes(peer.username)&&m.text.includes(day)&&m.text.includes('14:00–15:00')));
+  assert.equal((await cancel(original,later.id)).status,200);
+  assert.equal((await cancel(peer,legacy.id)).status,200);
+  const noSuccess = await post(incoming,booking('torchwood','负责人本人预约','18:00','19:00')); assert.equal(noSuccess.status,201);
+  // A lead who also owns a conflicting booking receives only one copy, even if both clubs share the address.
+  assert.equal((await setLead(peer,original.email)).status,200);
+  assert.equal((await setLead(sps,original.email)).status,200);
+  const shadow = booking('学生会','同步冲突原预约','08:00','09:00');
+  assert.equal((await post(original,shadow)).status,201);
+  const sync = {sourceId:'test-club',version:1,events:[{id:'t_'+'1'.repeat(32),title:'同步来访',location:'测试活动室',startsAt:Date.parse(day+'T08:30:00+08:00'),endsAt:Date.parse(day+'T09:30:00+08:00')}]};
+  for(const version of [1,1,2])assert.equal((await request(mf,'/api/integrations/sps',{...sync,version},'test-sync','PUT')).status,200);
+  await waitFor(()=>received('同步来访').length>0);
+  assertTo('同步来访',[original.email]);assert.ok(received('同步来访')[0].text.includes('SPS 日程同步'));
+  assertTo('负责人本人预约',[]);assertTo('同社团冲突',[]);assertTo('同步冲突原预约',[]);assertTo('历史活动',[lead]);
+  assertTo('第二场',[lead,lead]);assert.ok(received('第二场').some(m=>m.subject.includes('已取消')));
+  assertTo('两场冲突',[original.email,lead,incoming.email]);
+  const publicBody=await (await request(mf,'/api/activities')).text();assert.ok(!publicBody.includes('@'));assert.ok(!publicBody.includes(incoming.username));
+ } finally { await mf.dispose(); }
 });

@@ -8,6 +8,7 @@ import {courseEntries,curriculumForBrowser,validCourseFilters,COURSE_TYPES,type 
 import CourseFilterPanel from './course-filter';
 import {placement} from './calendar-layout';
 import AuthGate from './auth-gate';
+import ClubContact from './club-contact';
 import type {User} from './auth-session';
 const EMPTY_CURRICULUM:Curriculum={version:1,timetables:[]};
 const WEEKDAYS=['一','二','三','四','五','六','日'];
@@ -89,7 +90,7 @@ function BookingCalendar({localOnly=false,initialCurriculum=EMPTY_CURRICULUM,sub
  const weekCount=visible.length;
  return <div className="app-shell">
   <header className="topbar"><a className="brand" href={localOnly?'#':'./'} aria-label="物院社团时间预约首页"><CalendarDays size={25} aria-hidden="true"/><span>物院社团时间预约</span></a><div className="top-meta"><span className="live-dot"/>{localOnly?'本地预览 · 预约仅保存在此浏览器':'查看社团活动安排'}<span className="school">中山大学</span></div></header>
-  {user&&<div className="account-strip"><span>{user.username} · {user.club}</span><button onClick={logout}>退出登录</button></div>}
+  {user&&<div className="account-strip"><span>{user.username} · {user.club}</span><ClubContact key={user.id} club={user.club}/><button onClick={logout}>退出登录</button></div>}
   <main><section className="intro"><div><h1>社团活动预约</h1><p>查看活动安排，选择日期和时间完成预约。</p></div><div className="horizon"><span className="horizon-icon"><CalendarDays size={20}/></span><div><small>当前可预约</small><strong>{dateNow?`${shortDate(dateNow)} — ${shortDate(maxDate)}`:'正在读取日期…'}</strong><span>未来两个月 · 北京时间</span></div></div></section>
   <div className="workspace"><section className="calendar-panel" aria-label="预约周历"><div className="calendar-toolbar"><div className="calendar-title"><h2>预约日历</h2><span className="count">本周 {weekCount} 场</span></div><div className="navigation"><button className="today-btn" onClick={()=>setPage(0)}>本周</button><div className="arrows"><button aria-label="上一周" disabled={currentPage===0} onClick={()=>setPage(Math.max(0,currentPage-1))}><ChevronLeft size={17}/></button><span>{currentPage===0?'本周':currentPage===1?'下周':`第 ${currentPage+1} 周`}</span><button aria-label="下一周" disabled={currentPage>=lastPage} onClick={()=>setPage(Math.min(lastPage,currentPage+1))}><ChevronRight size={17}/></button></div></div></div>
   <div className="calendar-caption"><span>{weekStart?`${weekStart.slice(0,4)} 年 ${shortDate(weekStart)} — ${shortDate(addDays(weekStart,6))}`:'加载中…'}</span><span className="pages">{pageNumbers.map(i=><button key={i} aria-label={`第 ${i+1} 页`} aria-current={currentPage===i?'page':undefined} className={currentPage===i?'active':''} onClick={()=>setPage(i)}><span aria-hidden="true">{i+1}</span></button>)}<span>{currentPage+1} / {lastPage+1}</span></span></div>

@@ -6,6 +6,8 @@
 
 登录时默认勾选“在此手机保存密码，下次自动登录”，可取消。密码和会话使用 Android Keystore 的 AES-GCM 加密保存在应用私有空间；原生代码在会话过期后直接登录固定后端，不将保存的密码回传网页。退出登录撤销当前会话并清除本机保存；菜单可单独清除保存密码。网页登录仅在 sessionStorage 保留短期会话，不保存密码。
 
+登录后在日历上方点「填写主负责人邮箱」或「修改主负责人邮箱」。普通预约由其他成员创建时，邮件发给本社团主负责人。确认跨社团时间冲突后，已有预约的创建者和双方负责人收到协商提醒。取消活动会通知本社团负责人；由其他成员代取消时，原预约人也收到通知。同一事件按邮箱去重。
+
 ## 数据路径
 
 `APK 内置页面 → HTTPS /api/bookings → 现有 Cloudflare Worker → SQLite Durable Object`
@@ -44,7 +46,7 @@ release 签名配置由环境变量 `BOOKING_ANDROID_SIGNING_PROPERTIES` 指向�
 ./gradlew testDebugUnitTest lintRelease assembleRelease
 ```
 
-包名 `org.spsclub.booking`，当前版本 `1.1.0` / code `2`，与 `org.spsclub.schedule` 并存。沿用 1.0.0 签名，可覆盖升级。后端新增登录保护后旧 App 必须升级。备份签名密钥和配置，不要把它们发给成员或放进源码包。
+包名 `org.spsclub.booking`，当前版本 `1.2.0` / code `3`，与 `org.spsclub.schedule` 并存。沿用 1.0.0 签名，可覆盖升级。后端新增登录保护后旧 App 必须升级。备份签名密钥和配置，不要把它们发给成员或放进源码包。
 
 ## 验证
 

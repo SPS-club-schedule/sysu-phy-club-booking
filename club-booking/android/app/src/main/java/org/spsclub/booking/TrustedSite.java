@@ -12,7 +12,7 @@ final class TrustedSite {
     static final String API_HOST = "sysu-phy-club-book.folderrewind.top";
     private static final Set<String> API_PATHS = Set.of("/api/bookings", "/api/curriculum", "/api/health", "/api/updates",
         "/api/auth/config", "/api/auth/register", "/api/auth/login", "/api/auth/me", "/api/auth/logout",
-        "/api/auth/verify", "/api/auth/resend", "/api/auth/reset-request", "/api/auth/reset", "/api/auth/live-ticket");
+        "/api/auth/verify", "/api/auth/resend", "/api/auth/reset-request", "/api/auth/reset", "/api/auth/live-ticket", "/api/auth/club-contact");
 
     private static URI https(String value) {
         try {

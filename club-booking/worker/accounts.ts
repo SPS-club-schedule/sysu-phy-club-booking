@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
-import { CLUBS,type Booking } from '../app/schedule';
+import { CLUBS } from '../app/schedule';
+import { BookingNotifications } from './booking-notifications';
 
 export type AccountUser = {id:string;username:string;club:string;email:string;emailVerified:boolean};
 export type AccountEnv = {RESEND_API_KEY?:string;EMAIL_FROM?:string;EMAIL_ENABLED?:string;FRONTEND_URL:string};
@@ -27,6 +28,7 @@ export async function jsonBody(request:Request,max=8192):Promise<Record<string,u
 }
 
 export class Accounts {
+ readonly notifications: BookingNotifications;
  private sql:SqlStorage;
  constructor(private ctx:DurableObjectState,private env:AccountEnv){
   this.sql=ctx.storage.sql;
@@ -40,16 +42,9 @@ export class Accounts {
    CREATE TABLE IF NOT EXISTS booking_tickets (ticket_hash TEXT PRIMARY KEY,token_hash TEXT NOT NULL,expires_at INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS booking_mail (id TEXT PRIMARY KEY,payload TEXT NOT NULL,expires_at INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL,created_at INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS booking_mail_usage (day INTEGER PRIMARY KEY,used INTEGER NOT NULL);`);
+  this.notifications = new BookingNotifications(this.sql, env);
  }
  configured(){return !!this.env.RESEND_API_KEY&&!!this.env.EMAIL_FROM&&this.env.EMAIL_ENABLED==='true'}
- bookingNotice(user:AccountUser,kind:'created'|'cancelled',booking:Booking,revision:number){
-  // Same transaction as the booking. Only the authenticated operator receives mail.
-  if(!user.emailVerified)return;
-  const now=Date.now(),id=hash(`booking:${kind}:${booking.id}:${revision}:${user.id}`);
-  const label=kind==='created'?'预约成功':'预约已取消';
-  const text=`${user.username}，你的${label}。\n\n社团：${booking.club}\n活动：${booking.activity}\n地点：${booking.location}\n时间：${booking.date} ${booking.start}–${booking.end}（北京时间）\n\n最新安排请以日历为准。\n物院社团预约\n${this.env.FRONTEND_URL}`;
-  this.sql.exec('INSERT OR IGNORE INTO booking_mail(id,payload,expires_at,next_at,created_at) VALUES(?,?,?,?,?)',id,JSON.stringify({from:this.env.EMAIL_FROM,to:[user.email],subject:`[物院社团预约] ${label} · ${booking.activity}`,text}),now+23*3600000,now,now);
- }
  limit(key:string,max:number,window:number){
   const now=Date.now(),keyHash=hash(key);
   this.sql.exec('DELETE FROM booking_auth_limits WHERE expires_at<=?',now);
@@ -106,6 +101,10 @@ export class Accounts {
   const path=new URL(request.url).pathname.replace('/api/auth/','');
   if(path==='config'&&request.method==='GET')return {clubs:CLUBS,emailEnabled:this.configured()};
   if(path==='me'&&request.method==='GET'){const {user,expiresAt}=this.authenticate(request);return {user,expiresAt}}
+  if (path === 'club-contact' && request.method === 'GET') {
+   const {user} = this.authenticate(request, true);
+   return {email: this.notifications.contact(user.club)};
+  }
   if(request.method!=='POST')fail(405,'不支持的操作');
   const data=await jsonBody(request),ip=request.headers.get('cf-connecting-ip')||'local';
   this.limit('ip:'+ip,100,15*60000);
@@ -148,6 +147,16 @@ export class Accounts {
    });
   }
   const auth=this.authenticate(request),row=this.account(auth.user.id)!;
+  if (path === 'club-contact') {
+   if (!row.verified) fail(403, '请先验证邮箱');
+   if (data.club !== undefined && data.club !== row.club) fail(403, '只能修改本社团的负责人邮箱');
+   const address = email(data.email);
+   const current = this.notifications.contact(row.club);
+   if (data.previousEmail !== undefined && data.previousEmail !== current) fail(409, '负责人邮箱已由其他成员更新，请重新打开后再修改');
+   this.limit('club-contact:' + row.id, 15, 3600000);
+   this.notifications.setContact(row.club, address);
+   return {email: address};
+  }
   if(path==='logout'){this.sql.exec('DELETE FROM booking_sessions WHERE token_hash=?',auth.tokenHash);return {signedOut:true}}
   if(path==='verify'){
    this.limit('verify-code:'+row.id,10,15*60000);this.checkCode(row,'verify',data.code);
